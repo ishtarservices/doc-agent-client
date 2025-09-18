@@ -1,0 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ALLnOne Design System - Minimal, soft, and calm aesthetic */
+
+@layer base {
+  :root {
+    /* Brand Colors - Minimal & Calm */
+    --primary-dark: 0 0% 6.7%; /* #111111 - near black for text/headers */
+    --soft-white: 0 0% 98%; /* #FAFAFA - soft off-white */
+    --panel-light: 0 0% 96.1%; /* #F5F5F5 - panels */
+    --gray-blue: 220 13% 46.1%; /* #6B7280 - muted gray-blue */
+    --mint-accent: 152 76% 85.9%; /* #A7F3D0 - pale mint */
+    --blue-accent: 214 95% 87.8%; /* #BFDBFE - pale blue */
+    
+    /* Dark Mode */
+    --dark-base: 217.2 32.6% 11%; /* #111827 - soft black */
+    --dark-panel: 217.2 32.6% 17.5%; /* #1F2937 - panels */
+    --dark-text: 220 13% 91%; /* #E5E7EB */
+    
+    /* Status Colors */
+    --success: 160 84% 39.4%; /* #10B981 - emerald */
+    --warning: 45 93% 58%; /* #FBBF24 - amber */
+    --danger: 0 84.2% 60.2%; /* #EF4444 - soft red */
+
+    /* Light Mode Tokens */
+    --background: var(--soft-white);
+    --foreground: var(--primary-dark);
+    --card: var(--soft-white);
+    --card-foreground: var(--primary-dark);
+    --popover: var(--soft-white);
+    --popover-foreground: var(--primary-dark);
+    --primary: var(--primary-dark);
+    --primary-foreground: var(--soft-white);
+    --secondary: var(--panel-light);
+    --secondary-foreground: var(--primary-dark);
+    --muted: var(--panel-light);
+    --muted-foreground: var(--gray-blue);
+    --accent: var(--mint-accent);
+    --accent-foreground: var(--primary-dark);
+    --destructive: var(--danger);
+    --destructive-foreground: var(--soft-white);
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: var(--mint-accent);
+    --radius: 0.75rem; /* rounded-xl */
+
+    /* Sidebar */
+    --sidebar-background: var(--soft-white);
+    --sidebar-foreground: var(--primary-dark);
+    --sidebar-primary: var(--primary-dark);
+    --sidebar-primary-foreground: var(--soft-white);
+    --sidebar-accent: var(--panel-light);
+    --sidebar-accent-foreground: var(--primary-dark);
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: var(--mint-accent);
+
+    /* Gradients */
+    --gradient-calm: linear-gradient(135deg, hsl(var(--soft-white)), hsl(var(--panel-light)));
+    --gradient-mint: linear-gradient(135deg, hsl(var(--mint-accent)), hsl(var(--blue-accent)));
+    --gradient-dark: linear-gradient(135deg, hsl(var(--dark-base)), hsl(var(--dark-panel)));
+
+    /* Shadows */
+    --shadow-soft: 0 1px 3px 0 hsl(var(--primary-dark) / 0.1), 0 1px 2px 0 hsl(var(--primary-dark) / 0.06);
+    --shadow-medium: 0 4px 6px -1px hsl(var(--primary-dark) / 0.1), 0 2px 4px -1px hsl(var(--primary-dark) / 0.06);
+    --shadow-large: 0 10px 15px -3px hsl(var(--primary-dark) / 0.1), 0 4px 6px -2px hsl(var(--primary-dark) / 0.05);
+
+    /* Transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-quick: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: var(--dark-base);
+    --foreground: var(--dark-text);
+    --card: var(--dark-base);
+    --card-foreground: var(--dark-text);
+    --popover: var(--dark-base);
+    --popover-foreground: var(--dark-text);
+    --primary: var(--dark-text);
+    --primary-foreground: var(--dark-base);
+    --secondary: var(--dark-panel);
+    --secondary-foreground: var(--dark-text);
+    --muted: var(--dark-panel);
+    --muted-foreground: var(--gray-blue);
+    --accent: var(--mint-accent);
+    --accent-foreground: var(--dark-base);
+    --destructive: var(--danger);
+    --destructive-foreground: var(--dark-text);
+    --border: var(--dark-panel);
+    --input: var(--dark-panel);
+    --ring: var(--mint-accent);
+    --sidebar-background: var(--dark-base);
+    --sidebar-foreground: var(--dark-text);
+    --sidebar-primary: var(--mint-accent);
+    --sidebar-primary-foreground: var(--dark-base);
+    --sidebar-accent: var(--dark-panel);
+    --sidebar-accent-foreground: var(--dark-text);
+    --sidebar-border: var(--dark-panel);
+    --sidebar-ring: var(--mint-accent);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
