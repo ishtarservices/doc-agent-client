@@ -1,23 +1,17 @@
 import React, { useState } from 'react';
-import { MessageSquare, Calendar, Inbox, X, Send, FolderOpen, Plus, Building, ChevronDown, Filter, Folder, Loader2 } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { MessageSquare, Calendar, Inbox, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useFloatingBarData } from '@/hooks/useFloatingBarData';
 import { useAIAssistant } from '@/hooks/useBoardData';
-import { type AIResponse } from '@/types/api';
+import { useAuth } from '@/hooks/useAuth';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import AIAssistant from './panels/AIAssistantPanel';
+import { ProjectPanelContent } from './panels/ProjectPanel';
+import type { AIRequest, AIResponse } from '@/types/ai';
 
-type FloatingMenuType = 'ai' | 'planner' | 'inbox' | 'projects' | 'organizations' | null;
+type FloatingMenuType = 'ai' | 'planner' | 'inbox' | 'projects' | null;
 
 interface FloatingBottomBarProps {
   onAIResponse?: (response: AIResponse) => void;
@@ -29,12 +23,10 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
   currentProjectId
 }) => {
   const [activeMenu, setActiveMenu] = useState<FloatingMenuType>(null);
-  const [aiInput, setAiInput] = useState('');
-  const location = useLocation();
-  const currentPath = location.pathname;
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const {
-    organization,
     projects,
     currentProject,
     tasks,
@@ -43,7 +35,6 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
     isLoading,
     notifications,
     upcomingTasks,
-    switchOrganization,
     switchProject,
     refreshData
   } = useFloatingBarData(currentProjectId);
@@ -55,93 +46,233 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
-  const handleAiSubmit = () => {
-    if (!aiInput.trim() || aiAssistantMutation.isPending || !currentProject) return;
+  const handleAIMessage = async (message: string, attachments?: File[]): Promise<AIResponse> => {
+    if (!currentProject || !user) {
+      toast.error('Project or user not available');
+      throw new Error('Project or user not available');
+    }
 
-    const request = {
-      input: aiInput.trim(),
-      projectId: currentProject._id,
-      organizationId: currentProject.organizationId,
-      context: {
-        currentTasks: tasks,
-        currentColumns: columns,
-        availableAgents: agents
-      },
-      options: {
-        autoAssignAgent: true,
-        createInColumn: columns.find(col => col.name === 'backlog')?._id
-      }
-    };
+    try {
+      // Process attachments if any
+      const processedAttachments = attachments ? await Promise.all(
+        attachments.map(async (file) => ({
+          type: file.type.startsWith('image/') ? 'image' as const : 'document' as const,
+          url: URL.createObjectURL(file),
+          name: file.name,
+          size: file.size,
+          mimeType: file.type,
+          content: await fileToBase64(file)
+        }))
+      ) : undefined;
 
-    aiAssistantMutation.mutate(request, {
-      onSuccess: (response) => {
-        // Handle different response types
-        switch (response.type) {
-          case 'general_answer':
-            toast.success('AI Response', {
-              description: response.message,
-              duration: 5000,
-            });
-            break;
+      // Build enhanced AI request with better column-task relationship mapping
+      const enhancedColumns = columns.map(col => ({
+        ...col,
+        taskCount: tasks.filter(t => t.columnId === col._id).length,
+        tasks: tasks.filter(t => t.columnId === col._id)
+      }));
 
-          case 'task_creation':
-            if (response.createdTasks && response.createdTasks.length > 0) {
-              toast.success(`Created ${response.createdTasks.length} new task(s)!`, {
+      // Improved default column selection logic
+      const getDefaultColumn = () => {
+        // Priority order for column selection
+        const columnPriority = ['backlog', 'todo', 'ready', 'pending', 'new'];
+
+        // First, try to find by name (case-insensitive)
+        for (const priority of columnPriority) {
+          const found = columns.find(col =>
+            col.name?.toLowerCase() === priority ||
+            col.title?.toLowerCase() === priority ||
+            col.title?.toLowerCase().includes(priority)
+          );
+          if (found) return found._id;
+        }
+
+        // If no priority match, use the first column with lowest task count
+        const leastBusyColumn = enhancedColumns
+          .filter(col => !col.settings?.taskLimit || col.taskCount < col.settings.taskLimit)
+          .sort((a, b) => a.taskCount - b.taskCount)[0];
+
+        return leastBusyColumn?._id || columns[0]?._id;
+      };
+
+      const aiRequest: AIRequest = {
+        input: message,
+        userId: user.id,
+        projectId: currentProject._id,
+        organizationId: currentProject.organizationId,
+        attachments: processedAttachments,
+        context: {
+          currentTasks: tasks,
+          currentColumns: enhancedColumns,
+          availableAgents: agents,
+          project: currentProject,
+          organization: {
+            _id: currentProject.organizationId,
+            name: 'Current Organization', // This should come from organization context
+            slug: 'current-org',
+            settings: {
+              defaultColumns: [],
+              aiCredits: 10000,
+              maxProjects: 10,
+              features: []
+            },
+            members: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isActive: true
+          }
+        },
+        options: {
+          autoAssignAgent: true,
+          createInColumn: getDefaultColumn(),
+          enableTools: true,
+          responseFormat: 'text',
+          priority: 'normal'
+        }
+      };
+
+      // Send request using the mutation and return the response
+      return new Promise<AIResponse>((resolve, reject) => {
+        aiAssistantMutation.mutate(aiRequest, {
+          onSuccess: (response) => {
+            console.log('AI Assistant response:', response);
+            // Handle different response types
+            switch (response.type) {
+            case 'general_answer':
+              toast.success('AI Response', {
+                description: response.message,
+                duration: 5000,
+              });
+              break;
+
+            case 'task_creation':
+              if (response.createdTasks && response.createdTasks.length > 0) {
+                toast.success(`Created ${response.createdTasks.length} new task(s)!`, {
+                  description: response.message,
+                  duration: 4000,
+                });
+              }
+              if (response.createdColumns && response.createdColumns.length > 0) {
+                toast.success(`Created ${response.createdColumns.length} new column(s)!`, {
+                  description: 'Board updated with new columns',
+                  duration: 4000,
+                });
+              }
+              break;
+
+            case 'task_management':
+              toast.success('Task management completed!', {
                 description: response.message,
                 duration: 4000,
               });
-              if (onAIResponse) {
-                onAIResponse(response);
+              break;
+
+            case 'project_management':
+              toast.success('Project updated!', {
+                description: response.message,
+                duration: 4000,
+              });
+              break;
+
+            case 'tool_execution': {
+              const successfulTools = response.toolResults?.filter(tr => tr.success).length || 0;
+              const failedTools = response.toolResults?.filter(tr => !tr.success).length || 0;
+              
+              if (successfulTools > 0) {
+                toast.success(`Executed ${successfulTools} action(s) successfully`, {
+                  description: response.message,
+                  duration: 4000,
+                });
               }
+              
+              if (failedTools > 0) {
+                toast.warning(`${failedTools} action(s) failed`, {
+                  description: 'Some operations could not be completed',
+                  duration: 4000,
+                });
+              }
+              break;
             }
-            break;
 
-          case 'task_management':
-            toast.success('Task management operation completed!', {
-              description: response.message,
-              duration: 4000,
+            case 'agent_assignment':
+              toast.success('Agent assigned!', {
+                description: response.message,
+                duration: 4000,
+              });
+              break;
+
+            case 'error':
+              toast.error('AI Assistant Error', {
+                description: response.message,
+                duration: 5000,
+              });
+              break;
+
+            default:
+              toast.info('AI Response', {
+                description: response.message || 'Operation completed',
+                duration: 4000,
+              });
+          }
+
+          // Call the callback if provided
+          if (onAIResponse) {
+            onAIResponse(response);
+          }
+
+          // Enhanced query invalidation for better data refresh
+          if (currentProject) {
+            // Force refresh the project context to get updated tasks/columns
+            queryClient.invalidateQueries({
+              queryKey: ['project-context', currentProject._id]
             });
-            if (onAIResponse) {
-              onAIResponse(response);
+
+            // More targeted refresh based on what was actually changed
+            if (response.createdTasks?.length > 0 || response.updatedTasks?.length > 0) {
+              queryClient.invalidateQueries({
+                queryKey: ['tasks', currentProject._id]
+              });
             }
-            break;
 
-          case 'agent_assignment':
-            toast.success('Agent assigned!', {
-              description: response.message,
-              duration: 4000,
-            });
-            if (onAIResponse) {
-              onAIResponse(response);
+            if (response.createdColumns?.length > 0) {
+              queryClient.invalidateQueries({
+                queryKey: ['columns', currentProject._id]
+              });
             }
-            break;
 
-          case 'error':
-            toast.error('AI Assistant Error', {
-              description: response.message,
-              duration: 5000,
-            });
-            break;
+            // If projects were created/updated, refresh organization projects
+            if (response.createdProjects?.length > 0 || response.updatedProjects?.length > 0) {
+              queryClient.invalidateQueries({
+                queryKey: ['organization-projects', currentProject.organizationId]
+              });
+            }
+          }
 
-          default:
-            toast.info('AI Response', {
-              description: response.message || 'Operation completed',
-              duration: 4000,
-            });
+          // Original refresh for backward compatibility
+          refreshData();
+
+          // Resolve the promise with the response
+          resolve(response);
+        },
+        onError: (error) => {
+          toast.error('AI Assistant Error', {
+            description: error.message || 'Failed to process your request',
+            duration: 5000,
+          });
+          // Reject the promise with the error
+          reject(error);
         }
+      });
+      });
 
-        // Clear input, refresh data, and close menu
-        setAiInput('');
-        refreshData();
-        setActiveMenu(null);
-      },
-      onError: (error) => {
-        toast.error('AI Assistant Error', {
-          description: error.message || 'Failed to process your request',
-          duration: 5000,
-        });
-      }
-    });
+    } catch (error) {
+      console.error('Error processing AI request:', error);
+      toast.error('Failed to process request', {
+        description: 'Please try again',
+        duration: 5000,
+      });
+      throw error;
+    }
   };
 
   const handleProjectSwitch = async (projectId: string) => {
@@ -149,218 +280,99 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
     setActiveMenu(null);
   };
 
-  const handleOrganizationSwitch = async (organizationId: string) => {
-    await switchOrganization(organizationId);
-    setActiveMenu(null);
-  };
-
-  // Get contextual content based on current page
-  const getContextualContent = () => {
-    if (currentPath.startsWith('/board')) {
-      return (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Board Filters</h3>
-          <div className="space-y-2">
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Filter className="h-4 w-4 mr-2" />
-              All Tasks
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Filter className="h-4 w-4 mr-2" />
-              My Tasks
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Filter className="h-4 w-4 mr-2" />
-              High Priority
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    if (currentPath.startsWith('/docs')) {
-      return (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Quick Access</h3>
-          <div className="space-y-2">
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Folder className="h-4 w-4 mr-2" />
-              README.md
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Folder className="h-4 w-4 mr-2" />
-              CONTEXT.md
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full justify-start">
-              <Folder className="h-4 w-4 mr-2" />
-              CHANGELOG.md
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    return null;
+  // Helper function to convert file to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix to get just the base64 content
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
   };
 
   const renderDropup = () => {
     if (!activeMenu) return null;
 
+    // AI Assistant gets special treatment with the new component
+    if (activeMenu === 'ai') {
+      return (
+        <AIAssistant
+          isOpen={true}
+          onClose={() => setActiveMenu(null)}
+          onSendMessage={handleAIMessage}
+          currentProject={currentProject ? {
+            _id: currentProject._id,
+            name: currentProject.name
+          } : undefined}
+          isLoading={aiAssistantMutation.isPending}
+          taskCount={tasks.length}
+          agentCount={agents.length}
+        />
+      );
+    }
+
+    // Other menu panels remain as cards
     return (
       <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 w-80 mb-2">
-        <Card className="shadow-lg border-2 bg-background/95 backdrop-blur-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-sm">
-              {activeMenu === 'ai' && '🤖 AI Assistant'}
+        <div className="bg-background/95 backdrop-blur-sm rounded-lg shadow-lg border-2 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">
               {activeMenu === 'planner' && '📅 Planner'}
               {activeMenu === 'inbox' && '📥 Inbox'}
               {activeMenu === 'projects' && '📁 Projects'}
-              {activeMenu === 'organizations' && '🏢 Organizations'}
-            </CardTitle>
+            </h3>
             <Button
               variant="ghost"
               size="sm"
               className="h-6 w-6 p-0"
               onClick={() => setActiveMenu(null)}
             >
-              <X className="h-4 w-4" />
+              ×
             </Button>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {activeMenu === 'ai' && (
-              <div className="space-y-3">
-                <div className="flex space-x-2">
-                  <Input
-                    placeholder="Ask AI or create tasks..."
-                    value={aiInput}
-                    onChange={(e) => setAiInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !aiAssistantMutation.isPending && handleAiSubmit()}
-                    disabled={aiAssistantMutation.isPending || !currentProject}
-                    className="flex-1"
-                  />
-                  <Button size="sm" onClick={handleAiSubmit} disabled={aiAssistantMutation.isPending || !currentProject}>
-                    {aiAssistantMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {currentProject ? (
-                    `Try: "Create a task for legal review" or "Summarize backlog" • ${tasks.length} tasks • ${agents.length} agents available`
-                  ) : (
-                    'Select a project to use AI assistant'
-                  )}
-                </div>
-              </div>
-            )}
+          </div>
 
-            {activeMenu === 'planner' && (
-              <ScrollArea className="h-48">
-                <div className="space-y-3">
-                  {upcomingTasks.map((task) => (
-                    <div key={task.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{task.title}</p>
-                        <p className="text-xs text-muted-foreground">{task.deadline}</p>
-                      </div>
-                      <Badge variant={task.priority === 'high' ? 'destructive' : task.priority === 'medium' ? 'default' : 'secondary'}>
-                        {task.priority}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-
-            {activeMenu === 'inbox' && (
-              <ScrollArea className="h-48">
-                <div className="space-y-3">
-                  {notifications.map((notification) => (
-                    <div key={notification.id} className="p-2 rounded-lg bg-muted/50">
-                      <p className="text-sm">{notification.message}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{notification.time}</p>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-
-            {activeMenu === 'projects' && (
-              <ScrollArea className="h-48">
-                <div className="space-y-3">
-                  {projects.map((project) => (
-                    <div
-                      key={project._id}
-                      className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                        project._id === currentProject?._id ? 'bg-primary/10 border border-primary/20' : 'bg-muted/50 hover:bg-muted/70'
-                      }`}
-                      onClick={() => handleProjectSwitch(project._id)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">{project.name}</p>
-                          <p className="text-xs text-muted-foreground">{project.description}</p>
-                        </div>
-                        {project._id === currentProject?._id && <Badge variant="default" className="text-xs">Active</Badge>}
-                      </div>
-                    </div>
-                  ))}
-                  <Button variant="outline" size="sm" className="w-full mt-2">
-                    <Plus className="h-3 w-3 mr-2" />
-                    New Project
-                  </Button>
-                </div>
-              </ScrollArea>
-            )}
-
-            {activeMenu === 'organizations' && (
-              <div className="space-y-4">
-                {/* Current Organization & Project */}
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">Current Organization</div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="w-full justify-between text-left" size="sm">
-                          <span className="truncate">{organization?.name || 'No Organization'}</span>
-                          <ChevronDown className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-56">
-                        {/* Organization switching would be implemented here */}
-                        <DropdownMenuItem>+ New Organization</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+          {activeMenu === 'planner' && (
+            <div className="space-y-3 max-h-48 overflow-y-auto">
+              {upcomingTasks.map((task) => (
+                <div key={task.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{task.title}</p>
+                    <p className="text-xs text-muted-foreground">{task.deadline}</p>
                   </div>
-
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">Current Project</div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="w-full justify-between text-left" size="sm">
-                          <span className="truncate">{currentProject?.name || 'No Project'}</span>
-                          <ChevronDown className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-56">
-                        {projects.map((project) => (
-                          <DropdownMenuItem key={project._id} onClick={() => handleProjectSwitch(project._id)}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{project.name}</span>
-                              {project._id === currentProject?._id && <Badge variant="default" className="text-xs">Active</Badge>}
-                            </div>
-                          </DropdownMenuItem>
-                        ))}
-                        <DropdownMenuItem>+ New Project</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  <Badge variant={task.priority === 'high' ? 'destructive' : task.priority === 'medium' ? 'default' : 'secondary'}>
+                    {task.priority}
+                  </Badge>
                 </div>
+              ))}
+            </div>
+          )}
 
-                {/* Page-specific contextual content */}
-                {getContextualContent()}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          {activeMenu === 'inbox' && (
+            <div className="space-y-3 max-h-48 overflow-y-auto">
+              {notifications.map((notification) => (
+                <div key={notification.id} className="p-2 rounded-lg bg-muted/50">
+                  <p className="text-sm">{notification.message}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{notification.time}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeMenu === 'projects' && (
+            <ProjectPanelContent
+              onClose={() => setActiveMenu(null)}
+              isLoading={isLoading}
+              currentProject={currentProject}
+              projects={projects}
+              onProjectSwitch={handleProjectSwitch}
+            />
+          )}
+        </div>
       </div>
     );
   };
@@ -369,18 +381,7 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
     <>
       {renderDropup()}
       <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50">
-        <div className="flex items-center space-x-1 bg-background/95 backdrop-blur-sm rounded-full shadow-sm px-3 py-2">
-          <Button
-            variant={activeMenu === 'organizations' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => toggleMenu('organizations')}
-            className="rounded-full px-3"
-            disabled={isLoading}
-          >
-            <Building className="h-4 w-4 mr-1" />
-            Org
-          </Button>
-          <div className="w-px h-5 bg-border" />
+        <div className="flex items-center space-x-1 bg-background/95 backdrop-blur-sm rounded-full shadow-lg border px-3 py-2">
           <Button
             variant={activeMenu === 'projects' ? 'default' : 'ghost'}
             size="sm"
@@ -391,18 +392,25 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
             <FolderOpen className="h-4 w-4 mr-1" />
             Projects
           </Button>
+          
           <div className="w-px h-5 bg-border" />
+          
           <Button
             variant={activeMenu === 'ai' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => toggleMenu('ai')}
             className="rounded-full px-3"
-            disabled={isLoading}
+            disabled={isLoading || !currentProject}
           >
             <MessageSquare className="h-4 w-4 mr-1" />
             AI
+            {aiAssistantMutation.isPending && (
+              <div className="ml-1 h-2 w-2 bg-primary rounded-full animate-pulse" />
+            )}
           </Button>
+          
           <div className="w-px h-5 bg-border" />
+          
           <Button
             variant={activeMenu === 'planner' ? 'default' : 'ghost'}
             size="sm"
@@ -413,7 +421,9 @@ const FloatingBottomBar: React.FC<FloatingBottomBarProps> = ({
             <Calendar className="h-4 w-4 mr-1" />
             Planner
           </Button>
+          
           <div className="w-px h-5 bg-border" />
+          
           <Button
             variant={activeMenu === 'inbox' ? 'default' : 'ghost'}
             size="sm"

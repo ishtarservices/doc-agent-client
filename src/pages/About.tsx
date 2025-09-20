@@ -40,7 +40,8 @@ const About = () => {
   ];
 
   return (
-    <div className="space-y-12 p-8">
+    <div className="h-full overflow-y-auto">
+      <div className="space-y-12 p-8">
       {/* Hero Section */}
       <div className="text-center space-y-6 max-w-3xl mx-auto">
         <div className="space-y-2">
@@ -176,6 +177,7 @@ const About = () => {
         <p>© 2024 ALLnOne. Built with React, TypeScript, and Tailwind CSS.</p>
         <p className="mt-1">Powered by Supabase and designed for modern development workflows.</p>
       </div>
+    </div>
     </div>
   );
 };

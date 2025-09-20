@@ -5,12 +5,12 @@ import FloatingBottomBar from '@/components/floatingBar/FloatingBottomBar';
 
 const Layout = () => {
   return (
-    <div className="min-h-screen w-full flex flex-col bg-background">
+    <div className="h-full w-full flex flex-col bg-background overflow-hidden">
       <Navbar />
-      <main className="flex-1">
+      <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
-      <FloatingBottomBar />
+      {/* <FloatingBottomBar /> */}
     </div>
   );
 };

@@ -9,8 +9,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
+import OrganizationSelector from '@/components/OrganizationSelector';
 
 const Navbar = () => {
   const location = useLocation();
@@ -56,10 +57,10 @@ const Navbar = () => {
 
           {/* Right Side */}
           <div className="flex items-center space-x-4">
-            {/* New Project Button */}
-            <Button size="sm" className="hidden sm:inline-flex">
-              New Project
-            </Button>
+            {/* Organization Selector */}
+            <div className="hidden sm:inline-flex">
+              <OrganizationSelector />
+            </div>
 
             {/* Notifications */}
             <Button variant="ghost" size="sm">

@@ -1,14 +1,15 @@
 # Doc Agent Board
 
-A modern task management and document collaboration platform with Electron desktop support and real-time AI integration.
+A sophisticated multi-tenant task management and document collaboration platform featuring real-time AI integration, organizational management, and cross-platform desktop support.
 
-## Architecture
+## Architecture Overview
 
-**Frontend**: React 18 + TypeScript + Vite
+**Frontend**: React 18 + TypeScript + Vite with SWC
 **Backend**: Express + TypeScript with Claude AI integration
-**Database**: Supabase (PostgreSQL) + MongoDB
-**Desktop**: Electron app
-**Authentication**: Supabase Auth
+**Database**: Dual architecture (Supabase PostgreSQL + MongoDB)
+**Desktop**: Electron for cross-platform applications
+**Authentication**: Supabase Auth with persistent sessions
+**Real-time**: WebSockets + Supabase subscriptions + TanStack Query auto-refresh
 
 ## Key Technologies
 
@@ -51,26 +52,44 @@ npm run server:build
 npm run server:start
 ```
 
-## Features
+## Core Features
 
-- **Kanban-style task boards** with TanStack Query caching
-- **Real-time collaboration** with automatic background updates
-- **Document management** system
-- **Authentication & protected routes** with Supabase
-- **Dark/light theme switching** with next-themes
-- **Desktop application** via Electron
-- **AI integration** via backend API with optimistic updates
-- **Smart caching** with 30-second refresh intervals
-- **Optimistic UI updates** with automatic error recovery
-- **Background data synchronization** without user intervention
+- **🏢 Multi-tenant Organizations** - Complete organization management with seamless switching
+- **📋 Project-based Kanban Boards** - Advanced task management with drag-and-drop
+- **🤖 AI Integration** - Claude AI assistant for intelligent task creation and management
+- **⚡ Real-time Collaboration** - Live updates with WebSockets and Supabase subscriptions
+- **📱 Responsive Design** - Mobile-first approach with adaptive layouts
+- **🖥️ Desktop Application** - Cross-platform Electron app (Windows, macOS, Linux)
+- **🔐 Secure Authentication** - Supabase auth with protected routes and persistent sessions
+- **🎨 Theme Support** - Dark/light mode with automatic system detection
+- **⚡ Smart Caching** - TanStack Query with optimistic updates and background sync
+- **📄 Document Management** - Integrated document collaboration system
 
-## Data Management Architecture
+## Application Flow & Architecture
 
-The application uses a sophisticated caching strategy powered by TanStack Query:
+### Multi-Tenant Structure
+The application follows a hierarchical organization model:
+**User → Organization → Projects → Boards → Tasks**
 
-- **Custom Hooks**: All data operations use centralized hooks in `src/hooks/useBoardData.ts`
-- **Automatic Caching**: Data cached for 30 seconds with background refresh
-- **Smart Invalidation**: Related data updates when mutations occur
-- **Optimistic Updates**: UI responds immediately, rolls back on failure
-- **Error Recovery**: Built-in retry logic with exponential backoff
-- **Real-time Sync**: Combines manual refresh with automatic updates
+### Key Architectural Components
+
+1. **Authentication Layer** - Supabase auth with automatic session management
+2. **Organization Context** - Multi-tenant support with seamless switching
+3. **Data Management** - TanStack Query with sophisticated caching strategy
+4. **Real-time Updates** - Background sync with optimistic UI updates
+
+### Advanced Caching Strategy
+
+- **Centralized Hooks** - All data operations through `src/hooks/useBoardData.ts`
+- **30-Second Refresh** - Automatic background data synchronization
+- **Optimistic Updates** - Immediate UI response with automatic rollback
+- **Smart Invalidation** - Strategic cache clearing during organization switches
+- **Race Condition Prevention** - Global switching states and query cancellation
+- **Error Handling** - Exponential backoff retry with 403/404 handling
+
+### Component Architecture
+
+- **Context Providers** - Auth and Organization management
+- **Protected Routes** - Automatic authentication verification
+- **Responsive Layout** - Mobile-first design with adaptive components
+- **shadcn/ui Integration** - Consistent design system with Radix primitives

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a React-based task board/project management application built with modern web technologies. It features authentication, a kanban-style board interface, document management, and marketplace functionality.
+**Doc Agent Board** is a sophisticated React-based task management and document collaboration platform with comprehensive organizational features. The application combines kanban-style boards, real-time AI integration, and multi-tenant organization management with both web and desktop support via Electron.
 
 ## Technology Stack
 
@@ -13,61 +13,126 @@ This is a React-based task board/project management application built with moder
 - **UI Framework**: shadcn/ui components built on Radix UI primitives
 - **Styling**: Tailwind CSS with custom animations
 - **Routing**: React Router v6 with nested routes
-- **Database**: Supabase (PostgreSQL with real-time features)
+- **Database**: Dual database architecture (Supabase PostgreSQL + MongoDB)
 - **Authentication**: Supabase Auth with persistent sessions
-- **State Management**: React Query (@tanstack/react-query) for server state
+- **State Management**: TanStack Query for server state with optimistic updates
 - **Form Handling**: React Hook Form with Zod validation
 - **Theme Support**: next-themes for dark/light mode switching
+- **Desktop**: Electron for cross-platform desktop application
+- **Backend**: Express + TypeScript with Claude AI integration
+- **Real-time**: WebSockets + Supabase subscriptions + auto-refresh
 
 ## Development Commands
 
 ```bash
-# Start development server (runs on port 8080)
+# Frontend development server (port 8080)
 npm run dev
 
-# Build for production
-npm run build
+# Full-stack development (frontend + backend)
+npm run dev:full
 
-# Build for development (preserves debugging info)
-npm run build:dev
+# Desktop application development
+npm run electron:dev
 
-# Run linting
-npm run lint
+# Production builds
+npm run build                # Web build
+npm run build:dev           # Development build with debug info
+npm run electron:pack       # Desktop package
+npm run electron:dist       # Desktop distribution
 
-# Preview production build
-npm run preview
+# Backend operations
+npm run server:dev          # Backend development
+npm run server:build        # Backend build
+npm run server:start        # Backend production
+
+# Quality assurance
+npm run lint                # ESLint check
+npm run preview            # Preview production build
 ```
 
-## Project Structure
+## Application Architecture & Flow
 
-### Core Application Files
-- `src/App.tsx` - Main application component with routing setup and TanStack Query provider
-- `src/main.tsx` - Application entry point with React 18 createRoot
-- `src/contexts/AuthContext.tsx` - Authentication state management using Supabase
-- `src/integrations/supabase/` - Supabase client configuration and TypeScript types
-- `src/hooks/useBoardData.ts` - Custom TanStack Query hooks for all data operations
+### Multi-Tenant Organization System
+The application follows a hierarchical structure:
+**User → Organization → Projects → Boards → Tasks**
 
-### Page Components
-- `src/pages/Dashboard.tsx` - Main dashboard page
-- `src/pages/Board.tsx` - Kanban board interface for task management
-- `src/pages/Docs.tsx` - Document management system
-- `src/pages/Marketplace.tsx` - Marketplace functionality
-- `src/pages/About.tsx` - About page
-- `src/pages/auth/Auth.tsx` - Authentication forms
-- `src/pages/NotFound.tsx` - 404 error page
+1. **Authentication Layer** (`src/contexts/AuthContext.tsx`)
+   - Supabase authentication with session persistence
+   - Automatic cache invalidation on auth state changes
+   - Prefetches user organizations on login
+
+2. **Organization Management** (`src/contexts/OrganizationContext.tsx`)
+   - Multi-tenant organization support with context switching
+   - Global organization switching state prevents query race conditions
+   - Automatic organization creation for new users
+   - LocalStorage persistence for selected organization
+
+3. **Data Management Layer** (`src/hooks/useBoardData.ts`)
+   - Centralized TanStack Query hooks with intelligent caching
+   - Optimistic updates with automatic rollback on failure
+   - 30-second cache intervals with background refresh
+   - Smart cache invalidation during organization switches
+
+### Application Flow
+
+1. **Initialization**: `src/main.tsx` → `src/App.tsx`
+   - React 18 concurrent mode with createRoot
+   - Provider hierarchy: QueryClient → Theme → Auth → Organization → Router
+
+2. **Route Structure** (React Router v6):
+   ```
+   /auth → Auth.tsx (public)
+   / → Layout → Dashboard (protected)
+   /projects/:projectId/board → Board.tsx (protected)
+   /docs → Docs.tsx (protected)
+   /marketplace → Marketplace.tsx (protected)
+   /about → About.tsx (protected)
+   ```
+
+3. **Protected Routes**: All main routes wrapped in `ProtectedRoute.tsx`
+   - Automatic redirect to `/auth` if not authenticated
+   - Organization verification and setup
 
 ### Component Architecture
-- `src/components/ui/` - Reusable UI components from shadcn/ui
-- `src/components/layout/` - Layout components (Navbar, Sidebar, Layout wrapper)
-- `src/components/board/` - Board-specific components (TaskCard, BoardColumn, etc.)
-- `src/components/ProtectedRoute.tsx` - Route protection wrapper
 
-### Key Features
-- **Authentication**: Full auth flow with protected routes using Supabase
-- **Responsive Design**: Mobile-first approach with responsive components
+#### Core Application Structure
+- `src/App.tsx` - Provider setup and routing configuration
+- `src/main.tsx` - React 18 application entry point
+- `src/components/layout/Layout.tsx` - Main layout with Navbar + FloatingBottomBar
+
+#### Context Providers
+- `src/contexts/AuthContext.tsx` - User authentication and session management
+- `src/contexts/OrganizationContext.tsx` - Organization switching and management
+- Custom hooks: `src/hooks/useAuth.ts`, `src/hooks/useOrganization.ts`
+
+#### Pages and Views
+- `src/pages/Dashboard.tsx` - Organization overview with welcome flow
+- `src/pages/Board.tsx` - Kanban board interface with project selection
+- `src/pages/auth/Auth.tsx` - Authentication forms (login/signup)
+- Additional pages: Docs, Marketplace, About, NotFound
+
+#### Specialized Components
+- `src/components/ui/` - shadcn/ui design system components
+- `src/components/board/` - Board-specific components:
+  - `BoardColumn.tsx` - Draggable columns with task lists
+  - `TaskCard.tsx` - Individual task cards with editing
+  - `BoardHeader.tsx` - Project header with controls
+  - `FloatingActionBubble.tsx` - AI assistant integration
+- `src/components/OrganizationSelector.tsx` - Organization switching interface
+- `src/components/floatingBar/` - Bottom navigation with project context
+
+### Core Features & Capabilities
+
+- **Multi-tenant Organizations**: Complete organization management with switching
+- **Project-based Boards**: Kanban-style task management per project
+- **Real-time Collaboration**: WebSocket + Supabase subscriptions + auto-refresh
+- **AI Integration**: Claude AI assistant for task creation and management
+- **Authentication**: Full Supabase auth flow with protected routes
+- **Responsive Design**: Mobile-first with adaptive layouts
 - **Theme Support**: Automatic dark/light mode switching
-- **Real-time Updates**: Supabase real-time subscriptions for collaborative features
-- **Form Validation**: Zod schema validation with React Hook Form integration
+- **Desktop App**: Cross-platform Electron application
+- **Smart Caching**: TanStack Query with optimistic updates and background sync
+- **Form Validation**: Zod schema validation with React Hook Form
 
 ## Important Configuration
 
@@ -100,19 +165,26 @@ npm run preview
 - Follow the shadcn/ui component patterns for consistency
 - Utilize CSS variables defined in `src/index.css` for theme support
 
-### Data Management & Caching
-- **TanStack Query Integration**: All API interactions use custom hooks with automatic caching
-- **Custom Hooks**: Located in `src/hooks/useBoardData.ts` for centralized data management
-  - `useProjectContext(projectId)` - Fetches and caches project data with auto-refresh
-  - `useCreateTask()`, `useUpdateTask()`, `useDeleteTask()` - CRUD operations with optimistic updates
-  - `useCreateColumn()`, `useUpdateColumn()` - Column management with cache invalidation
-  - `useMoveTask()` - Task movement with real-time updates
-  - `useAIAssistant()` - AI operations with automatic background refresh
-- **Automatic Caching**: Data is cached for 30 seconds and auto-refreshes on window focus
-- **Smart Invalidation**: Mutations automatically invalidate related cache entries
-- **Background Updates**: Data refreshes every 30 seconds without user intervention
-- **Optimistic Updates**: UI updates immediately, with rollback on failure
-- **Error Handling**: Built-in retry logic with exponential backoff
+### Advanced Data Management & Caching Strategy
+
+The application implements a sophisticated caching architecture centered around `src/hooks/useBoardData.ts`:
+
+#### Query Hooks & Cache Management
+- **`useProjectContext(projectId)`** - Main project data hook with 30s refresh intervals
+- **`useUserOrganizations()`** - Organization list with 5-minute cache
+- **`useCreateTask()`, `useUpdateTask()`, `useDeleteTask()`** - Task CRUD with optimistic updates
+- **`useCreateColumn()`, `useUpdateColumn()`, `useDeleteColumn()`** - Column management
+- **`useMoveTask()`** - Drag-and-drop with immediate UI feedback
+- **`useAIAssistant()`** - AI operations with background data refresh
+- **`useEnsureUserOrganization()`** - First-time user organization setup
+
+#### Cache Coordination & Race Condition Prevention
+- **Organization Switching**: Global `isOrgSwitching` state blocks queries during transitions
+- **Query Cancellation**: Automatic cancellation of stale requests during org switches
+- **Cache Invalidation**: Strategic invalidation of organization-specific data
+- **Optimistic Updates**: UI responds immediately with automatic rollback on failure
+- **Background Sync**: 30-second intervals + window focus refresh
+- **Error Handling**: Exponential backoff retry with 403/404 handling
 
 ### Database Interactions
 - Import supabase client from `@/integrations/supabase/client`

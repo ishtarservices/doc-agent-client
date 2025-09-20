@@ -183,51 +183,51 @@ export interface ProjectContext {
   }>;
 }
 
-export interface AIRequest {
-  input: string;
-  projectId: string;
-  organizationId: string;
-  agentId?: string; // Specific agent to use
-  context: {
-    currentTasks: TaskData[];
-    currentColumns: ColumnData[];
-    availableAgents: AgentData[];
-  };
-  options?: {
-    autoAssignAgent: boolean;
-    createInColumn?: string;
-    maxTokens?: number;
-  };
-}
+// export interface AIRequest {
+//   input: string;
+//   projectId: string;
+//   organizationId: string;
+//   agentId?: string; // Specific agent to use
+//   context: {
+//     currentTasks: TaskData[];
+//     currentColumns: ColumnData[];
+//     availableAgents: AgentData[];
+//   };
+//   options?: {
+//     autoAssignAgent: boolean;
+//     createInColumn?: string;
+//     maxTokens?: number;
+//   };
+// }
 
-export interface AIResponse {
-  type: 'general_answer' | 'task_creation' | 'task_management' | 'agent_assignment' | 'error';
-  message: string;
+// export interface AIResponse {
+//   type: 'general_answer' | 'task_creation' | 'task_management' | 'agent_assignment' | 'error';
+//   message: string;
   
-  // Creation Results
-  createdTasks?: TaskData[];
-  createdColumns?: ColumnData[];
-  createdAgents?: AgentData[];
+//   // Creation Results
+//   createdTasks?: TaskData[];
+//   createdColumns?: ColumnData[];
+//   createdAgents?: AgentData[];
   
-  // Modification Results
-  updatedTasks?: TaskData[];
-  updatedColumns?: ColumnData[];
+//   // Modification Results
+//   updatedTasks?: TaskData[];
+//   updatedColumns?: ColumnData[];
   
-  // Agent Execution Results
-  agentResults?: Array<{
-    taskId: string;
-    agentId: string;
-    success: boolean;
-    output?: string;
-    tokensUsed: number;
-    error?: string;
-  }>;
+//   // Agent Execution Results
+//   agentResults?: Array<{
+//     taskId: string;
+//     agentId: string;
+//     success: boolean;
+//     output?: string;
+//     tokensUsed: number;
+//     error?: string;
+//   }>;
   
-  // Metadata
-  tokensUsed: number;
-  executionTime: number;
-  suggestions?: string[];
-}
+//   // Metadata
+//   tokensUsed: number;
+//   executionTime: number;
+//   suggestions?: string[];
+// }
 
 // ============================================================================
 // API REQUEST/RESPONSE INTERFACES

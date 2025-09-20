@@ -147,7 +147,7 @@ const TaskDetailPopup = ({
                 <div className="flex items-center space-x-4 text-sm text-muted-foreground">
                   <span className="flex items-center">
                     <Calendar className="h-3 w-3 mr-1" />
-                    {task.createdAt?.toLocaleDateString()}
+                    {task.createdAt ? new Date(task.createdAt).toLocaleDateString() : 'No date'}
                   </span>
                   <span>{tokenEstimate} tokens</span>
                 </div>

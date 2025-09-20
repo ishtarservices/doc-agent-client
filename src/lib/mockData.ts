@@ -1131,4 +1131,12 @@ export const mockAPI = {
       suggestions: ['Try asking me to create a task', 'Ask about assigning agents to tasks']
     };
   },
+
+  // User Organization Operations
+  async getUserOrganizations(): Promise<OrganizationData[]> {
+    console.log('[MOCK] Fetching user organizations');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    // Return array with the mock organization
+    return [{ ...mockOrganization }];
+  },
 };

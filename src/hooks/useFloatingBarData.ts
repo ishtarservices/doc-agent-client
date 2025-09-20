@@ -11,6 +11,8 @@ import {
   type AgentData
 } from '@/lib/api';
 import { useProjectContext, queryKeys } from './useBoardData';
+import { useOrganization } from './useOrganization';
+import { projectSelectionKeys } from './useProjectSelection';
 
 // Mock notification type (expand this when implementing real notifications)
 interface Notification {
@@ -35,7 +37,9 @@ interface UpcomingTask {
 export const useFloatingBarData = (initialProjectId?: string) => {
   const queryClient = useQueryClient();
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(initialProjectId);
-  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | undefined>();
+
+  // Use the organization hook to get the current organization
+  const { currentOrganization } = useOrganization();
 
   // Fetch project context using optimized hook from useBoardData
   const {
@@ -45,31 +49,29 @@ export const useFloatingBarData = (initialProjectId?: string) => {
     refetch: refetchContext
   } = useProjectContext(currentProjectId || '');
 
-  // Fetch projects for the current organization
-  // Note: getProjectsByOrganization may be undefined for mock data
+  // Use the organization ID from context, fallback to project context
+  const organizationId = currentOrganization?._id || projectContext?.organization?._id;
+
+  // Fetch projects for the current organization using the same query key as useProjectSelection
   const {
     data: projects = [],
     isLoading: isProjectsLoading,
     refetch: refetchProjects
   } = useQuery({
-    queryKey: ['organizationProjects', currentOrganizationId],
+    queryKey: projectSelectionKeys.organizationProjects(organizationId || ''),
     queryFn: () => {
+      if (!organizationId) return Promise.resolve([]);
+
       if (!getProjectsByOrganization) {
-        // Return mock projects when API is not available
+        // Mock mode: return current project as single project
         return Promise.resolve([projectContext?.project].filter(Boolean) as ProjectData[]);
       }
-      return getProjectsByOrganization(currentOrganizationId!);
+
+      return getProjectsByOrganization(organizationId);
     },
-    enabled: !!currentOrganizationId,
+    enabled: !!organizationId,
     staleTime: 5 * 60 * 1000,
   });
-
-  // Set organization ID when project context changes
-  useEffect(() => {
-    if (projectContext?.organization?._id) {
-      setCurrentOrganizationId(projectContext.organization._id);
-    }
-  }, [projectContext]);
 
   // Generate mock notifications (replace with real API when ready)
   const generateMockNotifications = useCallback((): Notification[] => {
@@ -133,18 +135,6 @@ export const useFloatingBarData = (initialProjectId?: string) => {
     });
   }, [queryClient]);
 
-  // Switch organization
-  const switchOrganization = useCallback(async (organizationId: string) => {
-    setCurrentOrganizationId(organizationId);
-
-    // Clear current project when switching organizations
-    setCurrentProjectId(undefined);
-
-    // Invalidate organization-related queries
-    await queryClient.invalidateQueries({
-      queryKey: ['organizationProjects', organizationId]
-    });
-  }, [queryClient]);
 
   // Refresh all data
   const refreshData = useCallback(async () => {
@@ -155,7 +145,7 @@ export const useFloatingBarData = (initialProjectId?: string) => {
   }, [refetchContext, refetchProjects]);
 
   // Derived state
-  const organization: OrganizationData | undefined = projectContext?.organization;
+  const organization: OrganizationData | undefined = currentOrganization || projectContext?.organization;
   const currentProject: ProjectData | undefined = projectContext?.project;
   const tasks: TaskData[] = projectContext?.tasks || [];
   const columns: ColumnData[] = projectContext?.columns || [];
@@ -189,11 +179,10 @@ export const useFloatingBarData = (initialProjectId?: string) => {
 
     // Actions
     switchProject,
-    switchOrganization,
     refreshData,
 
     // IDs for reference
     currentProjectId,
-    currentOrganizationId,
+    currentOrganizationId: organizationId,
   };
 };

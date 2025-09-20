@@ -9,8 +9,6 @@ import type {
   OrganizationData,
   ProjectData,
   AgentData,
-  AIRequest,
-  AIResponse,
   ApiResponse,
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
@@ -25,9 +23,10 @@ import type {
   AssignAgentRequest,
   RunAgentRequest
 } from '@/types/api';
+import type { AIRequest, AIResponse } from '@/types/ai';
 
 // Configuration - Toggle between mock and real API
-const USE_MOCK_DATA = true; // Set to false when backend is ready
+const USE_MOCK_DATA = false; // Set to false when backend is ready
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 /**
@@ -45,13 +44,17 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
   if (sessionError || !session) {
+    console.error('🔑 [API] Authentication failed:', sessionError?.message || 'No session');
     throw new Error('Authentication required');
   }
 
-  return {
+  const headers = {
     'Authorization': `Bearer ${session.access_token}`,
     'Content-Type': 'application/json',
   };
+
+
+  return headers;
 }
 
 /**
@@ -61,31 +64,73 @@ async function makeAuthenticatedRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const requestId = Math.random().toString(36).substring(2, 15);
+  const fullUrl = `${API_BASE_URL}${endpoint}`;
+
+  //   bodyPreview: options.body ? options.body.toString().substring(0, 100) + '...' : null,
+  // });
+
   try {
     const headers = await getAuthHeaders();
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const finalHeaders = {
+      ...headers,
+      ...options.headers,
+    };
+
+    const response = await fetch(fullUrl, {
       ...options,
-      headers: {
-        ...headers,
-        ...options.headers,
-      },
+      headers: finalHeaders,
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (parseError) {
+        errorData = { message: `Failed to parse error response: ${parseError}` };
+      }
+
+      console.error(`🌐 [API-${requestId}] HTTP Error:`, {
+        status: response.status,
+        statusText: response.statusText,
+        errorData,
+      });
+
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
     const result: ApiResponse<T> = await response.json();
 
+
     if (!result.success) {
+      console.error(`🌐 [API-${requestId}] API Error:`, result.message || result.error);
       throw new Error(result.message || result.error || 'Request failed');
     }
 
+    // console.log(`🌐 [API-${requestId}] Request successful`);
     return result.data as T;
   } catch (error) {
-    console.error(`API Request Error (${endpoint}):`, error);
+    console.error(`🌐 [API-${requestId}] Request failed:`, {
+      endpoint,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    // Enhanced error handling for 403s
+    if (error instanceof Error && error.message.includes('403')) {
+      if (error.message.includes('not a member')) {
+        throw new Error('You are not a member of this organization. Please contact an administrator for access.');
+      }
+      if (error.message.includes('private')) {
+        throw new Error('This is a private project. Please request access from the project owner.');
+      }
+      if (error.message.includes('Required role')) {
+        throw new Error('Insufficient permissions. You need higher privileges for this action.');
+      }
+      throw new Error('Access denied. Please check your permissions or contact support.');
+    }
+
     throw error;
   }
 }
@@ -297,7 +342,6 @@ const realAPI = {
   // AI Assistant Operations
   // ========================================
   async callAIAssistant(request: AIRequest): Promise<AIResponse> {
-    console.log('Calling AI Assistant API...');
     return await makeAuthenticatedRequest<AIResponse>('/ai/assistant', {
       method: 'POST',
       body: JSON.stringify(request),
@@ -310,6 +354,13 @@ const realAPI = {
     lastResetDate: Date;
   }> {
     return await makeAuthenticatedRequest(`/organizations/${organizationId}/ai-usage`);
+  },
+
+  // ========================================
+  // User Organization Operations
+  // ========================================
+  async getUserOrganizations(): Promise<OrganizationData[]> {
+    return await makeAuthenticatedRequest<OrganizationData[]>('/user/organizations');
   },
 };
 
@@ -596,6 +647,11 @@ export const getAIUsage = USE_MOCK_DATA
   ? undefined // Mock doesn't implement this yet
   : realAPI.getAIUsage;
 
+// User Organization Operations
+export const getUserOrganizations = USE_MOCK_DATA
+  ? mockAPI.getUserOrganizations
+  : realAPI.getUserOrganizations;
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -604,6 +660,34 @@ export const getAPIMode = () => USE_MOCK_DATA ? 'MOCK' : 'REAL';
 
 export const setMockMode = (_useMock: boolean) => {
   console.warn('setMockMode is not implemented. Change USE_MOCK_DATA constant in api.ts');
+};
+
+// Helper to handle first-time user setup
+export const ensureUserHasOrganization = async (userEmail: string): Promise<OrganizationData> => {
+  try {
+    // First try to get user's existing organizations
+    const organizations = await getUserOrganizations?.() || [];
+
+    if (organizations.length > 0) {
+      return organizations[0]; // Return first organization
+    }
+
+    // If no organizations, create a default one
+    if (!createOrganization) {
+      throw new Error('Organization creation not available');
+    }
+
+    const newOrg = await createOrganization({
+      name: `${userEmail.split('@')[0]}'s Organization`,
+      slug: `${userEmail.split('@')[0]}-org-${Date.now()}`,
+      description: 'Default organization created automatically',
+    });
+
+    return newOrg;
+  } catch (error) {
+    console.error('Error ensuring user has organization:', error);
+    throw new Error('Failed to setup user organization. Please contact support.');
+  }
 };
 
 // Legacy helper functions for backward compatibility
@@ -620,8 +704,8 @@ export async function saveTasksToDatabase(
     _id: `temp-${Date.now()}-${index}`,
     title: task.title,
     description: task.description,
-    type: task.type,
-    status: task.status,
+    type: task.type as TaskData['type'],
+    status: task.status as TaskData['status'],
     tokenEstimate: task.tokenEstimate,
     projectId: projectId,
     createdBy: userId,

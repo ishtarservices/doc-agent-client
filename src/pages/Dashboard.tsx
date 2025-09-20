@@ -1,10 +1,16 @@
 import React from 'react';
-import { Plus, Activity, FileText, Mail, BarChart3, Github } from 'lucide-react';
+import { Plus, Activity, FileText, Mail, BarChart3, Github, Building2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useOrganization } from '@/hooks/useOrganization';
+import { useAuth } from '@/hooks/useAuth';
+import OrganizationSelector from '@/components/OrganizationSelector';
 
 const Dashboard = () => {
+  const { user } = useAuth();
+  const { currentOrganization, organizations, isLoading } = useOrganization();
+
   // Mock data
   const recentUpdates = [
     { id: 1, doc: 'README.md', type: 'Auto-update', time: '2 hours ago' },
@@ -24,14 +30,40 @@ const Dashboard = () => {
     { period: 'This Month', tokens: 32400 },
   ];
 
+  // Show empty organization state if no organizations
+  if (!isLoading && organizations.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-background via-background to-muted/20">
+        <Card className="w-full max-w-md mx-4">
+          <CardHeader className="text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
+              <Building2 className="h-8 w-8 text-primary" />
+            </div>
+            <CardTitle>Welcome to Your Workspace</CardTitle>
+            <CardDescription>
+              You need to create or join an organization to start managing projects and tasks.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <OrganizationSelector />
+            <div className="text-center text-sm text-muted-foreground">
+              <p>Organizations help you collaborate with team members and manage multiple projects.</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8 p-8">
+    <div className="h-full overflow-y-auto">
+      <div className="space-y-8 p-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">
-            Welcome back! Here's what's happening with your project.
+            Welcome back{user?.email ? `, ${user.email}` : ''}! {currentOrganization ? `Organization: ${currentOrganization.name}` : 'Here\'s what\'s happening with your project.'}
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -171,6 +203,7 @@ const Dashboard = () => {
           </CardContent>
         </Card>
       </div>
+    </div>
     </div>
   );
 };

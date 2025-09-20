@@ -94,17 +94,14 @@ ALLnOne is an innovative platform that combines auto-updating documentation with
 
   const updateSections = () => {
     // Stub for update sections functionality
-    console.log('Updating document sections...');
   };
 
   const showDiff = () => {
     // Stub for diff display
-    console.log('Showing document diff...');
   };
 
   const createPR = () => {
     // Stub for PR creation
-    console.log('Creating pull request...');
   };
 
   return (

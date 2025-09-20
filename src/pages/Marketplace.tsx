@@ -97,17 +97,16 @@ const Marketplace = () => {
 
   const assignTool = (tool: Tool) => {
     // Stub for tool assignment
-    console.log('Assigning tool:', tool.name);
     setSelectedTool(null);
   };
 
   const addApiKey = (tool: Tool) => {
     // Stub for API key addition
-    console.log('Adding API key for:', tool.name);
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full overflow-y-auto">
+      <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -293,6 +292,7 @@ const Marketplace = () => {
           )}
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 };

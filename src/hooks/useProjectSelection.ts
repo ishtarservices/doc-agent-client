@@ -1,13 +1,15 @@
 // src/hooks/useProjectSelection.ts
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React from 'react';
 import {
   getProjectsByOrganization,
   type ProjectData,
 } from '@/lib/api';
 import { useProjectContext } from './useBoardData';
+import { useOrganization } from './useOrganization';
 
 // Query keys for project selection
 export const projectSelectionKeys = {
@@ -19,10 +21,21 @@ export const useProjectSelection = () => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
+  const { currentOrganization, isOrgSwitching } = useOrganization();
 
-  // Get current project context (for organization info)
-  const currentProjectId = projectId || '507f1f77bcf86cd799439011'; // Default fallback
-  const { data: projectContext } = useProjectContext(currentProjectId);
+  // Get current project context (for organization info) - only if projectId exists
+  const currentProjectId = projectId;
+  const prevOrganizationId = React.useRef<string | undefined>();
+
+  // Use current organization context as primary source
+  const organizationId = currentOrganization?._id;
+
+  // More aggressive prevention of queries during org switches
+  const shouldFetchProjectContext = !!currentProjectId &&
+    !isOrgSwitching &&
+    (!organizationId || !prevOrganizationId.current || organizationId === prevOrganizationId.current);
+
+  const { data: projectContext } = useProjectContext(currentProjectId || '', shouldFetchProjectContext);
 
   // Fetch projects for the current organization
   const {
@@ -30,18 +43,18 @@ export const useProjectSelection = () => {
     isLoading: isProjectsLoading,
     error: projectsError
   } = useQuery({
-    queryKey: projectSelectionKeys.organizationProjects(projectContext?.organization?._id || ''),
+    queryKey: projectSelectionKeys.organizationProjects(organizationId || ''),
     queryFn: () => {
-      if (!projectContext?.organization?._id) return Promise.resolve([]);
+      if (!organizationId) return Promise.resolve([]);
 
       if (!getProjectsByOrganization) {
         // Mock mode: return current project as single project
-        return Promise.resolve([projectContext.project].filter(Boolean) as ProjectData[]);
+        return Promise.resolve([projectContext?.project].filter(Boolean) as ProjectData[]);
       }
 
-      return getProjectsByOrganization(projectContext.organization._id);
+      return getProjectsByOrganization(organizationId);
     },
-    enabled: !!projectContext?.organization?._id,
+    enabled: !!organizationId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
@@ -60,6 +73,25 @@ export const useProjectSelection = () => {
     });
   }, [currentProjectId, navigate, queryClient]);
 
+  // Handle organization changes - just track the change, let buffer handle the transition
+  useEffect(() => {
+    if (organizationId && prevOrganizationId.current && organizationId !== prevOrganizationId.current) {
+      // Organization changed - the buffer state will handle the UI while data loads
+      console.log('🔄 [useProjectSelection] Organization changed, letting buffer state handle transition');
+    }
+    prevOrganizationId.current = organizationId;
+  }, [organizationId]);
+
+  // Secondary check: log when project not found but don't redirect - let Board handle it
+  useEffect(() => {
+    if (currentProjectId && projects.length > 0 && organizationId && !isOrgSwitching) {
+      const currentProjectInOrg = projects.find(p => p._id === currentProjectId);
+      if (!currentProjectInOrg) {
+        console.log('🔄 [useProjectSelection] Current project not found in new organization projects - Board will handle this');
+      }
+    }
+  }, [currentProjectId, projects, organizationId, isOrgSwitching]);
+
   // Get current project from the list
   const currentProject = projects.find(p => p._id === currentProjectId) || projectContext?.project;
 
@@ -73,7 +105,7 @@ export const useProjectSelection = () => {
     currentProjectId,
     currentProject,
     projects,
-    organization: projectContext?.organization,
+    organization: currentOrganization || projectContext?.organization,
 
     // Loading states
     isProjectsLoading,

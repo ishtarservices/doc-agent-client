@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import FloatingActionBubble from '@/components/board/FloatingActionBubble';
 import FloatingBottomBar from '@/components/floatingBar/FloatingBottomBar';
 import BoardColumn from '@/components/board/BoardColumn';
 import TaskCard from '@/components/board/TaskCard';
 import TaskDetailPopup from '@/components/board/TaskDetail';
+import AddColumnButton from '@/components/board/AddColumnButton';
+import EmptyProjectState from '@/components/board/EmptyProjectState';
 import {
   useProjectContext,
   useCreateColumn,
@@ -17,6 +17,7 @@ import {
   useMoveTask,
 } from '@/hooks/useBoardData';
 import { useProjectSelection } from '@/hooks/useProjectSelection';
+import { useOrganization } from '@/hooks/useOrganization';
 import {
   type AIResponse,
   type ColumnData,
@@ -28,10 +29,24 @@ const Board = () => {
   const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 
   // Use project selection hook for dynamic project management
-  const { currentProjectId, currentProject } = useProjectSelection();
+  const { currentProjectId, currentProject, projects } = useProjectSelection();
+  const { currentOrganization, isOrgSwitching } = useOrganization();
 
-  // TanStack Query hooks
-  const { data: projectContext, isLoading: loading, error, refetch } = useProjectContext(currentProjectId);
+  // Log organization switch completion for debugging
+  useEffect(() => {
+    // Just log when org switching completes - no navigation
+    if (!isOrgSwitching && currentProjectId && projects.length > 0) {
+      const currentProjectInOrg = projects.find(p => p._id === currentProjectId);
+      if (!currentProjectInOrg) {
+        console.log('🔄 [Board] Current project not found in new organization - will show appropriate UI state');
+      } else {
+        console.log('🔄 [Board] Project found in new organization - displaying board');
+      }
+    }
+  }, [isOrgSwitching, currentProjectId, projects]);
+
+  // TanStack Query hooks - let useProjectSelection control when to fetch
+  const { data: projectContext, isLoading: loading, error, refetch } = useProjectContext(currentProjectId || '');
   const createColumnMutation = useCreateColumn();
   const createTaskMutation = useCreateTask();
   const updateTaskMutation = useUpdateTask();
@@ -147,8 +162,7 @@ const Board = () => {
     });
   };
 
-  const handleAddColumn = () => {
-    const columnName = prompt('Enter column name:');
+  const handleAddColumn = (columnName: string) => {
     if (!columnName?.trim()) return;
 
     createColumnMutation.mutate({
@@ -210,6 +224,42 @@ const Board = () => {
     }
   };
 
+  // Show empty project state if no projects exist or no current project selected
+  if (!loading && !currentProjectId) {
+    // Check if we have any projects at all for current organization
+    if (projects.length === 0) {
+      return <EmptyProjectState hasOrganization={!!currentOrganization} />;
+    }
+
+    // If we have projects but no current project is selected, redirect to first project
+    if (projects.length > 0) {
+      window.location.href = `/projects/${projects[0]._id}/board`;
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">Redirecting to project...</p>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  // Show organization switching overlay
+  if (isOrgSwitching) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-lg font-medium">Switching Organization</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Please wait while we load your new workspace...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -224,6 +274,31 @@ const Board = () => {
   }
 
   if (error) {
+    // Check if this is a 404 error (project not found in current org)
+    const is404 = error instanceof Error && (error.message.includes('404') || error.message.includes('not found'));
+
+    console.log('❌ [Board] Error detected in Board component:', {
+      error: error instanceof Error ? error.message : String(error),
+      is404,
+      currentProjectId,
+      currentOrgId: currentOrganization?._id,
+      timestamp: new Date().toISOString()
+    });
+
+    if (is404) {
+      console.log('❌ [Board] 404 error detected - project likely not in current org, redirecting to home');
+      // Redirect immediately and show loading state
+      window.location.href = '/';
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">Redirecting...</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -236,33 +311,51 @@ const Board = () => {
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Scrollable Board Content */}
-      <div className="flex-1 overflow-hidden bg-gradient-to-br from-background via-background to-muted/20">
-        <div className="flex gap-4 p-4 h-full overflow-x-auto">
-          {formattedColumns.map((column) => (
-            <BoardColumn
-              key={column._id}
-              column={column}
-              taskCount={getTasksByColumn(column._id).length}
-              onToggleCollapse={handleToggleCollapse}
-              onTogglePin={handleTogglePin}
-              onToggleVisibility={handleToggleVisibility}
-              onAddTask={handleAddTask}
-            >
-              {/* Tasks */}
-              {getTasksByColumn(column._id).map((task) => (
-                <TaskCard
-                  key={task._id}
-                  task={task}
-                  onQuickAction={runQuickAction}
-                  onMarkComplete={handleMarkComplete}
-                  onDelete={handleDeleteTask}
-                  onMove={handleMoveTask}
-                  onShowDetails={handleShowTaskDetails}
-                />
+      {/* Board Content - Takes remaining space minus floating bar */}
+      <div className="flex-1 overflow-hidden bg-gradient-to-br from-background via-background to-muted/20 pb-20">
+        <div className="flex gap-3 p-4 h-full overflow-x-auto">
+          {formattedColumns.length === 0 ? (
+            // Empty state - show single "Add List" button
+            <AddColumnButton
+              onAddColumn={handleAddColumn}
+              isLoading={createColumnMutation.isPending}
+              variant="empty"
+            />
+          ) : (
+            <>
+              {/* Existing Columns */}
+              {formattedColumns.map((column) => (
+                <BoardColumn
+                  key={column._id}
+                  column={column}
+                  taskCount={getTasksByColumn(column._id).length}
+                  onToggleCollapse={handleToggleCollapse}
+                  onTogglePin={handleTogglePin}
+                  onToggleVisibility={handleToggleVisibility}
+                  onAddTask={handleAddTask}
+                >
+                  {/* Tasks */}
+                  {getTasksByColumn(column._id).map((task) => (
+                    <TaskCard
+                      key={task._id}
+                      task={task}
+                      onQuickAction={runQuickAction}
+                      onMarkComplete={handleMarkComplete}
+                      onDelete={handleDeleteTask}
+                      onMove={handleMoveTask}
+                      onShowDetails={handleShowTaskDetails}
+                    />
+                  ))}
+                </BoardColumn>
               ))}
-            </BoardColumn>
-          ))}
+              {/* Add Column Button - Always rightmost */}
+              <AddColumnButton
+                onAddColumn={handleAddColumn}
+                isLoading={createColumnMutation.isPending}
+                variant="regular"
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -279,9 +372,6 @@ const Board = () => {
         onAssignAgent={handleAssignAgent}
         onRunTask={handleRunTask}
       />
-
-      {/* Floating Action Bubble */}
-      <FloatingActionBubble onAddColumn={handleAddColumn} />
 
       {/* AI-Powered Floating Bottom Bar */}
       <FloatingBottomBar
