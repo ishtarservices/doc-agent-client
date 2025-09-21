@@ -37,6 +37,7 @@ import { useCreateProject } from "@/hooks/useBoardData";
 import { useOrganization } from "@/hooks/useOrganization";
 import { useProjectSwitcher } from "@/hooks/useProjectSelection";
 import { type ProjectData } from "@/types/api";
+import { useCacheManagement } from "@/hooks/useBoardData";
 
 interface ProjectPanelContentProps {
   onClose: () => void;
@@ -59,9 +60,10 @@ export const ProjectPanelContent: React.FC<ProjectPanelContentProps> = ({
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
 
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, isOrgSwitching } = useOrganization();
   const { switchProject } = useProjectSwitcher();
   const createProjectMutation = useCreateProject();
+  const { invalidateOrganizationData } = useCacheManagement();
 
   const handleProjectSelect = (projectId: string) => {
     if (projectId !== currentProject?._id) {
@@ -129,10 +131,40 @@ export const ProjectPanelContent: React.FC<ProjectPanelContentProps> = ({
     { label: "Due This Week", count: 0, active: false },
   ];
 
+  // Check if current project belongs to current organization
+  const isCurrentProjectValid = currentProject &&
+    projects.find(p => p._id === currentProject._id) &&
+    !isOrgSwitching;
+
   return (
     <div className="space-y-3 max-h-96 flex flex-col overflow-hidden">
+      {/* Organization Switching Indicator */}
+      {isOrgSwitching && (
+        <div className="bg-muted/20 border border-muted/40 rounded-md p-2.5 space-y-1.5">
+          <div className="flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+            <span className="text-xs text-muted-foreground">
+              Switching organizations...
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Current Project - Compact Display */}
-      {currentProject && (
+      {!isOrgSwitching && !isCurrentProjectValid && projects.length > 0 && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-md p-2.5 space-y-1.5">
+          <div className="flex items-center space-x-2">
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5 shrink-0">
+              No Project
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              Select a project from the list below
+            </span>
+          </div>
+        </div>
+      )}
+
+      {isCurrentProjectValid && (
         <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 space-y-1.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -324,7 +356,7 @@ export const ProjectPanelContent: React.FC<ProjectPanelContentProps> = ({
                 </div>
               ) : (
                 projects.map((project) => {
-                  const isCurrent = project._id === currentProject?._id;
+                  const isCurrent = project._id === currentProject?._id && isCurrentProjectValid;
 
                   return (
                     <div

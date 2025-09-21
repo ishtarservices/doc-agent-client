@@ -15,6 +15,8 @@ import {
   TestTube,
   DollarSign,
   MessageCircle,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +37,7 @@ interface TaskCardProps {
   onMove?: (taskId: string, newColumnId: string) => void;
   onDelete?: (taskId: string) => void;
   onShowDetails?: (task: TaskData) => void;
+  onViewResults?: (task: TaskData) => void; // New callback for viewing agent results
   isDragging?: boolean;
   isSelected?: boolean;
 }
@@ -45,6 +48,7 @@ const TaskCard = ({
   onMarkComplete,
   onEdit,
   onShowDetails,
+  onViewResults,
   isDragging = false,
   isSelected = false
 }: TaskCardProps) => {
@@ -143,12 +147,54 @@ const TaskCard = ({
                     )}
                   </div>
                 )}
+
+                {/* AI Agents */}
+                {task.agents && task.agents.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {task.agents.slice(0, 2).map((agent) => (
+                      <div
+                        key={agent.agentId}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs"
+                        title={agent.agentName}
+                      >
+                        <Server className="h-2 w-2" />
+                        <span className="truncate max-w-[60px]">{agent.agentName}</span>
+                      </div>
+                    ))}
+                    {task.agents.length > 2 && (
+                      <div className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs">
+                        +{task.agents.length - 2}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           {/* Action buttons */}
           <div className="flex items-start gap-1 shrink-0">
+            {/* View Results Button - show if task has agent results */}
+            {task.lastAgentResult && onViewResults && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewResults(task);
+                }}
+                title="View agent results"
+              >
+                {task.lastAgentResult.success ? (
+                  <Sparkles className="h-3 w-3 text-purple-500" />
+                ) : (
+                  <Eye className="h-3 w-3 text-purple-500" />
+                )}
+              </Button>
+            )}
+
+            {/* Run Agent Button */}
             <Button
               variant="ghost"
               size="sm"
@@ -157,6 +203,7 @@ const TaskCard = ({
                 e.stopPropagation();
                 onQuickAction(task._id, 'run');
               }}
+              title="Run agent"
             >
               <Play className="h-3 w-3 text-blue-500" />
             </Button>

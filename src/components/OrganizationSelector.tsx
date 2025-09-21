@@ -19,18 +19,27 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useOrganization } from '@/hooks/useOrganization';
-import { useCreateOrganization } from '@/hooks/useBoardData';
+import { useCreateOrganization, useCacheManagement } from '@/hooks/useBoardData';
 import type { OrganizationData } from '@/lib/api';
 
 const OrganizationSelector = () => {
   const { currentOrganization, setCurrentOrganization, organizations, isLoading } = useOrganization();
   const createOrgMutation = useCreateOrganization();
+  const { invalidateOnOrganizationSwitch } = useCacheManagement();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
 
 
   const handleOrganizationSelect = (org: OrganizationData) => {
+    const previousOrgId = currentOrganization?._id;
+    const newOrgId = org._id;
+
+    // Invalidate cache before switching to prevent stale data
+    if (previousOrgId !== newOrgId) {
+      invalidateOnOrganizationSwitch(previousOrgId, newOrgId);
+    }
+
     setCurrentOrganization(org);
   };
 
@@ -45,6 +54,13 @@ const OrganizationSelector = () => {
       },
       {
         onSuccess: (newOrg) => {
+          const previousOrgId = currentOrganization?._id;
+
+          // Invalidate cache when creating and switching to new org
+          if (previousOrgId) {
+            invalidateOnOrganizationSwitch(previousOrgId, newOrg._id);
+          }
+
           setCurrentOrganization(newOrg);
           setIsCreateDialogOpen(false);
           setNewOrgName('');

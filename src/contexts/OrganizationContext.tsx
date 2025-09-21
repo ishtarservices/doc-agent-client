@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { OrganizationData } from '@/lib/api';
 import { OrganizationContext } from './OrganizationContext.types';
-import { useUserOrganizations, useEnsureUserOrganization } from '@/hooks/useBoardData';
+import { useUserOrganizations, useEnsureUserOrganization, useAvailableAgents } from '@/hooks/useBoardData';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
@@ -20,6 +20,9 @@ export const OrganizationProvider: React.FC<OrganizationProviderProps> = ({ chil
 
   // Fetch user's organizations
   const { data: organizations, isLoading: isOrgLoading, error: orgError, refetch: refetchOrgs } = useUserOrganizations();
+
+  // Fetch available agents
+  const { data: availableAgents, isLoading: isLoadingAgents, refetch: refetchAgents } = useAvailableAgents();
 
   // Mutation to ensure user has organization
   const { mutate: ensureUserOrg, isPending: isEnsuring } = useEnsureUserOrganization();
@@ -170,6 +173,9 @@ export const OrganizationProvider: React.FC<OrganizationProviderProps> = ({ chil
     isLoading: isLoading || isOrgLoading || isEnsuring,
     organizations: organizations || [],
     isOrgSwitching, // Expose global org switching state
+    availableAgents: availableAgents || [],
+    isLoadingAgents,
+    refetchAgents,
   };
 
   return (

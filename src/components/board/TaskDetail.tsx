@@ -33,6 +33,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { TaskData } from '@/types/api';
+import { useOrganization } from '@/hooks/useOrganization';
+import { useAssignAgents, useRunAgent } from '@/hooks/useBoardData';
 
 interface TaskDetailPopupProps {
   task: TaskData | null;
@@ -40,8 +42,9 @@ interface TaskDetailPopupProps {
   onClose: () => void;
   onUpdate?: (taskId: string, updates: Partial<TaskData>) => void;
   onDelete?: (taskId: string) => void;
-  onAssignAgent?: (taskId: string, agent: string) => void;
+  onAssignAgent?: (taskId: string, agent: string) => void; // Keep for backward compatibility
   onRunTask?: (taskId: string) => void;
+  projectId?: string; // Add projectId for agent operations
 }
 
 const TaskDetailPopup = ({
@@ -52,10 +55,18 @@ const TaskDetailPopup = ({
   onDelete,
   onAssignAgent,
   onRunTask,
+  projectId,
 }: TaskDetailPopupProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTask, setEditedTask] = useState<Partial<TaskData>>({});
   const [newTag, setNewTag] = useState('');
+
+  // Get available agents from organization context
+  const { availableAgents } = useOrganization();
+
+  // Agent mutation hooks
+  const assignAgents = useAssignAgents();
+  const runAgent = useRunAgent();
 
   if (!task) return null;
 
@@ -118,6 +129,62 @@ const TaskDetailPopup = ({
     const updatedTags = currentTags.filter(tag => tag !== tagToRemove);
     setEditedTask({ ...editedTask, tags: updatedTags });
     onUpdate?.(task._id, { tags: updatedTags });
+  };
+
+  const handleAssignAgent = (agentId: string, agentName: string) => {
+    const currentAgents = task.agents || [];
+    const isAlreadyAssigned = currentAgents.some(agent => agent.agentId === agentId);
+
+    if (isAlreadyAssigned) {
+      toast.info('Agent is already assigned to this task');
+      return;
+    }
+
+    const updatedAgents = [...currentAgents, { agentId, agentName }];
+
+    if (projectId) {
+      assignAgents.mutate({
+        taskId: task._id,
+        agents: updatedAgents,
+        projectId,
+      });
+    } else {
+      toast.error('Project ID is required for agent assignment');
+    }
+  };
+
+  const handleRemoveAgent = (agentId: string) => {
+    const currentAgents = task.agents || [];
+    const updatedAgents = currentAgents.filter(agent => agent.agentId !== agentId);
+
+    if (projectId) {
+      assignAgents.mutate({
+        taskId: task._id,
+        agents: updatedAgents,
+        projectId,
+      });
+    } else {
+      toast.error('Project ID is required for agent removal');
+    }
+  };
+
+  const handleRunAgent = (agentId?: string) => {
+    if (!projectId) {
+      toast.error('Project ID is required to run agents');
+      return;
+    }
+
+    // Use provided agentId or default to first assigned agent
+    const targetAgentId = agentId || (task.agents && task.agents.length > 0 ? task.agents[0].agentId : undefined);
+
+    runAgent.mutate({
+      taskId: task._id,
+      agentId: targetAgentId,
+      projectId,
+    });
+
+    // Close the task detail popup after running
+    onClose();
   };
 
   const TypeIcon = getTypeIcon(task.type);
@@ -243,30 +310,56 @@ const TaskDetailPopup = ({
           {/* AI Agent Assignment */}
           <div>
             <h4 className="text-sm font-medium mb-2">AI Agent Assignment</h4>
+
+            {/* Assigned Agents */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {task.agents?.map((agent) => (
+                <Badge key={agent.agentId} variant="secondary" className="text-xs flex items-center gap-1">
+                  {agent.agentName}
+                  <button
+                    onClick={() => handleRemoveAgent(agent.agentId)}
+                    className="ml-1 hover:text-destructive"
+                    disabled={assignAgents.isPending}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+              {(!task.agents || task.agents.length === 0) && (
+                <span className="text-sm text-muted-foreground">No agents assigned</span>
+              )}
+            </div>
+
+            {/* Agent Selection */}
             <div className="space-y-2">
               <Select
-                value={task.assignedAgent || ''}
                 onValueChange={(value) => {
-                  onAssignAgent?.(task._id, value);
-                  toast.success(`Task assigned to ${value}`);
+                  const selectedAgent = availableAgents.find(agent => agent.id === value);
+                  if (selectedAgent) {
+                    handleAssignAgent(selectedAgent.id, selectedAgent.name);
+                  }
                 }}
+                disabled={assignAgents.isPending}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select AI agent or platform" />
+                  <SelectValue placeholder="Add AI agent" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="claude">Claude AI</SelectItem>
-                  <SelectItem value="gpt4">GPT-4</SelectItem>
-                  <SelectItem value="gemini">Google Gemini</SelectItem>
-                  <SelectItem value="copilot">GitHub Copilot</SelectItem>
-                  <SelectItem value="cursor">Cursor AI</SelectItem>
+                  {availableAgents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      <div className="flex flex-col">
+                        <span>{agent.name}</span>
+                        <span className="text-xs text-muted-foreground">{agent.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  {availableAgents.length === 0 && (
+                    <SelectItem value="no-agents" disabled>
+                      No agents available
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
-              {task.assignedAgent && (
-                <p className="text-xs text-muted-foreground">
-                  Currently assigned to: <span className="font-medium">{task.assignedAgent}</span>
-                </p>
-              )}
             </div>
           </div>
 
@@ -316,13 +409,11 @@ const TaskDetailPopup = ({
               </Button>
             </div>
             <Button
-              onClick={() => {
-                onRunTask?.(task._id);
-                toast.success('Task execution started');
-              }}
+              onClick={() => handleRunAgent()}
+              disabled={runAgent.isPending}
             >
               <Play className="h-4 w-4 mr-2" />
-              Run Task
+              {runAgent.isPending ? 'Running...' : 'Run Task'}
             </Button>
           </div>
         </div>

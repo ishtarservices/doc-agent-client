@@ -106,7 +106,10 @@ export interface TaskData {
   priority: 'low' | 'medium' | 'high' | 'urgent';
   
   // AI Agent Assignment
-  assignedAgent?: string; // Reference to AgentData._id
+  agents: Array<{
+    agentId: string;
+    agentName: string;
+  }>;
   agentHistory: Array<{
     agentId: string;
     assignedAt: Date;
@@ -157,6 +160,10 @@ export interface TaskData {
   updatedAt: Date;
   lastAgentRun?: Date;
   completedAt?: Date;
+
+  // Agent execution results (latest result stored for quick access)
+  lastAgentResult?: AgentExecutionResult;
+  executionResult?: AgentExecutionResult;
   
   // UI State (not stored in DB)
   isUpdating?: boolean;
@@ -336,7 +343,10 @@ export interface CreateTaskRequest {
   status?: TaskData['status'];
   priority?: TaskData['priority'];
   tokenEstimate?: number;
-  assignedAgent?: string;
+  agents?: Array<{
+    agentId: string;
+    agentName: string;
+  }>;
   assignees?: Array<{
     userId: string;
     role: 'owner' | 'assignee' | 'reviewer';
@@ -356,7 +366,10 @@ export interface UpdateTaskRequest {
   priority?: TaskData['priority'];
   columnId?: string;
   tokenEstimate?: number;
-  assignedAgent?: string;
+  agents?: Array<{
+    agentId: string;
+    agentName: string;
+  }>;
   assignees?: Array<{
     userId: string;
     role: 'owner' | 'assignee' | 'reviewer';
@@ -389,6 +402,62 @@ export interface RunAgentRequest {
     maxTokens?: number;
     temperature?: number;
   };
+}
+
+// New interfaces for agent operations
+export interface AvailableAgent {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  version: string;
+  isActive: boolean;
+}
+
+export interface AvailableAgentsResponse {
+  success: boolean;
+  agents: AvailableAgent[];
+  message?: string;
+}
+
+export interface AgentExecutionResult {
+  success: boolean;
+  message: string;
+  output?: string;
+  tokensUsed: number;
+  executionTime: number;
+  followUp?: {
+    suggestions: string[];
+    nextSteps?: string[];
+  };
+  error?: string;
+  // New artifacts field to support rich agent outputs
+  artifacts?: Array<{
+    type: 'git_patch' | 'code' | 'analysis' | 'documentation' | 'test_results' | 'file_diff';
+    title: string;
+    content: string;
+    metadata?: {
+      repository?: string;
+      branch?: string;
+      filesChanged?: number;
+      linesAdded?: number;
+      linesRemoved?: number;
+      language?: string;
+      severity?: 'low' | 'medium' | 'high' | 'critical';
+      testsPassed?: number;
+      testsFailed?: number;
+      coverage?: number;
+      [key: string]: string | number | undefined; // Allow additional metadata
+    };
+  }>;
+}
+
+export interface AssignAgentsRequest {
+  agents: Array<{
+    agentId: string;
+    agentName: string;
+  }>;
+  autoRun?: boolean;
 }
 
 // ============================================================================
@@ -427,7 +496,7 @@ export interface TaskFilters {
   status?: TaskStatus[];
   type?: TaskType[];
   priority?: TaskPriority[];
-  assignedAgent?: string[];
+  agents?: string[];
   assignees?: string[];
   tags?: string[];
   dueDate?: {

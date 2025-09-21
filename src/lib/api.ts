@@ -21,7 +21,11 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AssignAgentRequest,
-  RunAgentRequest
+  RunAgentRequest,
+  AvailableAgent,
+  AvailableAgentsResponse,
+  AgentExecutionResult,
+  AssignAgentsRequest
 } from '@/types/api';
 import type { AIRequest, AIResponse } from '@/types/ai';
 
@@ -101,7 +105,6 @@ async function makeAuthenticatedRequest<T>(
     }
 
     const result: ApiResponse<T> = await response.json();
-
 
     if (!result.success) {
       console.error(`🌐 [API-${requestId}] API Error:`, result.message || result.error);
@@ -248,13 +251,62 @@ const realAPI = {
     });
   },
 
-  async runAgent(request: RunAgentRequest): Promise<TaskData> {
-    return await makeAuthenticatedRequest<TaskData>(`/tasks/${request.taskId}/run-agent`, {
+  async runAgent(request: RunAgentRequest): Promise<AgentExecutionResult> {
+    // Backend returns the updated TaskData, but we need to extract the AgentExecutionResult
+    const updatedTask = await makeAuthenticatedRequest<TaskData>(`/agents/run/${request.taskId}`, {
       method: 'POST',
       body: JSON.stringify({
         agentId: request.agentId,
         options: request.options,
       }),
+    });
+
+    // Extract the execution result from the task
+    if (!updatedTask.executionResult) {
+      throw new Error('No execution result found in task response');
+    }
+
+    // Map the task's executionResult to our expected AgentExecutionResult format
+    const result: AgentExecutionResult = {
+      success: updatedTask.executionResult.success,
+      message: updatedTask.executionResult.output || 'Agent execution completed',
+      output: updatedTask.executionResult.output,
+      tokensUsed: updatedTask.executionResult.tokensUsed || 0,
+      executionTime: updatedTask.executionResult.executionTime || 0,
+      artifacts: updatedTask.executionResult.artifacts,
+      followUp: updatedTask.executionResult.followUp,
+      error: updatedTask.executionResult.error || undefined,
+    };
+
+    return result;
+  },
+
+  // New agent endpoints matching backend routes
+  async getAvailableAgents(): Promise<AvailableAgent[]> {
+    // makeAuthenticatedRequest already extracts result.data, so we get the array directly
+    const agentsData = await makeAuthenticatedRequest<Array<{
+      agentId: string;
+      agentName: string;
+      description: string;
+      type: string;
+      capabilities: string[];
+    }>>('/agents/available');
+
+    // Transform backend format to frontend format
+    return agentsData.map(agent => ({
+      id: agent.agentId,
+      name: agent.agentName,
+      description: agent.description,
+      capabilities: agent.capabilities,
+      version: '1.0.0', // Default version since backend doesn't provide it
+      isActive: true, // Default to active since backend doesn't provide it
+    }));
+  },
+
+  async assignAgentsToTask(taskId: string, data: AssignAgentsRequest): Promise<TaskData> {
+    return await makeAuthenticatedRequest<TaskData>(`/agents/assign/${taskId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 
@@ -380,7 +432,10 @@ interface RawTaskData {
   type: TaskData['type'];
   status: TaskData['status'];
   priority?: TaskData['priority'];
-  assignedAgent?: string;
+  agents?: Array<{
+    agentId: string;
+    agentName: string;
+  }>;
   agentHistory?: TaskData['agentHistory'];
   tokenEstimate?: number;
   token_estimate?: number;
@@ -402,6 +457,7 @@ interface RawTaskData {
   updatedAt?: Date;
   lastAgentRun?: Date;
   completedAt?: Date;
+  lastAgentResult?: AgentExecutionResult;
   isUpdating?: boolean;
   isNew?: boolean;
 }
@@ -449,7 +505,7 @@ function transformTaskData(task: RawTaskData): TaskData {
     type: task.type,
     status: task.status,
     priority: task.priority || 'medium',
-    assignedAgent: task.assignedAgent,
+    agents: task.agents || [],
     agentHistory: task.agentHistory || [],
     tokenEstimate: task.tokenEstimate || task.token_estimate || 0,
     actualTokensUsed: task.actualTokensUsed || 0,
@@ -469,6 +525,7 @@ function transformTaskData(task: RawTaskData): TaskData {
     updatedAt: task.updatedAt,
     lastAgentRun: task.lastAgentRun,
     completedAt: task.completedAt,
+    lastAgentResult: task.lastAgentResult,
     isUpdating: task.isUpdating,
     isNew: task.isNew,
   };
@@ -583,6 +640,15 @@ export const assignAgent = USE_MOCK_DATA
 export const runAgent = USE_MOCK_DATA
   ? mockAPI.runAgent
   : realAPI.runAgent;
+
+// New agent operations
+export const getAvailableAgents = USE_MOCK_DATA
+  ? undefined // Mock doesn't implement this yet
+  : realAPI.getAvailableAgents;
+
+export const assignAgentsToTask = USE_MOCK_DATA
+  ? undefined // Mock doesn't implement this yet
+  : realAPI.assignAgentsToTask;
 
 // Column Operations
 export const getColumns = USE_MOCK_DATA
@@ -726,8 +792,6 @@ export type {
   OrganizationData,
   ProjectData,
   AgentData,
-  AIRequest,
-  AIResponse,
   ApiResponse,
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
@@ -740,5 +804,9 @@ export type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AssignAgentRequest,
-  RunAgentRequest
+  RunAgentRequest,
+  AvailableAgent,
+  AvailableAgentsResponse,
+  AgentExecutionResult,
+  AssignAgentsRequest
 } from '@/types/api';

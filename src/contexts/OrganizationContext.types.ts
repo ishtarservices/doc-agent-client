@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { OrganizationData } from '@/lib/api';
+import type { OrganizationData, AvailableAgent } from '@/lib/api';
 
 export interface OrganizationContextType {
   currentOrganization: OrganizationData | null;
@@ -7,6 +7,9 @@ export interface OrganizationContextType {
   isLoading: boolean;
   organizations: OrganizationData[];
   isOrgSwitching: boolean; // Global flag to prevent queries during org switches
+  availableAgents: AvailableAgent[];
+  isLoadingAgents: boolean;
+  refetchAgents: () => void;
 }
 
 export const OrganizationContext = createContext<OrganizationContextType | undefined>(undefined);

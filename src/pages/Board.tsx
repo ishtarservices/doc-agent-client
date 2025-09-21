@@ -5,6 +5,7 @@ import FloatingBottomBar from '@/components/floatingBar/FloatingBottomBar';
 import BoardColumn from '@/components/board/BoardColumn';
 import TaskCard from '@/components/board/TaskCard';
 import TaskDetailPopup from '@/components/board/TaskDetail';
+import AgentResultModal from '@/components/board/AgentResultModal';
 import AddColumnButton from '@/components/board/AddColumnButton';
 import EmptyProjectState from '@/components/board/EmptyProjectState';
 import {
@@ -15,9 +16,11 @@ import {
   useUpdateColumn,
   useDeleteTask,
   useMoveTask,
+  useRunAgent,
 } from '@/hooks/useBoardData';
 import { useProjectSelection } from '@/hooks/useProjectSelection';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useCacheManagement } from '@/hooks/useBoardData';
 import {
   type AIResponse,
   type ColumnData,
@@ -27,26 +30,46 @@ import {
 const Board = () => {
   const [selectedTask, setSelectedTask] = useState<TaskData | null>(null);
   const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
+  const [resultTask, setResultTask] = useState<TaskData | null>(null);
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
 
   // Use project selection hook for dynamic project management
   const { currentProjectId, currentProject, projects } = useProjectSelection();
   const { currentOrganization, isOrgSwitching } = useOrganization();
+  const { invalidateProjectData } = useCacheManagement();
 
-  // Log organization switch completion for debugging
+  // Agent operations
+  const runAgentMutation = useRunAgent({ autoComplete: false }); // Set to true if you want auto-completion
+
+  // Handle organization switching and project validation
   useEffect(() => {
-    // Just log when org switching completes - no navigation
-    if (!isOrgSwitching && currentProjectId && projects.length > 0) {
-      const currentProjectInOrg = projects.find(p => p._id === currentProjectId);
-      if (!currentProjectInOrg) {
-        console.log('🔄 [Board] Current project not found in new organization - will show appropriate UI state');
-      } else {
-        console.log('🔄 [Board] Project found in new organization - displaying board');
+    if (!isOrgSwitching && currentOrganization) {
+      // Organization switch completed
+      if (currentProjectId && projects.length > 0) {
+        const currentProjectInOrg = projects.find(p => p._id === currentProjectId);
+        if (!currentProjectInOrg) {
+          console.log('🔄 [Board] Current project not found in new organization - redirecting');
+          // Invalidate stale project cache immediately
+          invalidateProjectData(currentProjectId);
+          // Don't redirect here - let the validation logic handle it
+        } else {
+          console.log('🔄 [Board] Project found in new organization - displaying board');
+        }
       }
     }
-  }, [isOrgSwitching, currentProjectId, projects]);
+  }, [isOrgSwitching, currentProjectId, projects, currentOrganization, invalidateProjectData]);
 
-  // TanStack Query hooks - let useProjectSelection control when to fetch
-  const { data: projectContext, isLoading: loading, error, refetch } = useProjectContext(currentProjectId || '');
+  // Check if current project is valid for current organization
+  const isCurrentProjectValid = currentProjectId &&
+    projects.length > 0 &&
+    projects.find(p => p._id === currentProjectId) &&
+    !isOrgSwitching;
+
+  // TanStack Query hooks - only fetch if project is valid for current org
+  const { data: projectContext, isLoading: loading, error, refetch } = useProjectContext(
+    isCurrentProjectValid ? currentProjectId : '',
+    isCurrentProjectValid
+  );
   const createColumnMutation = useCreateColumn();
   const createTaskMutation = useCreateTask();
   const updateTaskMutation = useUpdateTask();
@@ -70,6 +93,8 @@ const Board = () => {
   };
 
   const handleAddTask = async (columnId: string, taskData: { title: string; description?: string }) => {
+    if (!isCurrentProjectValid) return;
+
     // Map column name to proper status
     const column = formattedColumns.find(col => col._id === columnId);
     const statusMap: Record<string, TaskData['status']> = {
@@ -94,6 +119,7 @@ const Board = () => {
   };
 
   const handleToggleCollapse = (columnId: string) => {
+    if (!isCurrentProjectValid) return;
     const column = formattedColumns.find(col => col._id === columnId);
     if (!column) return;
 
@@ -132,7 +158,33 @@ const Board = () => {
   };
 
   const runQuickAction = (taskId: string, action: string) => {
-    toast.success(`Running ${action} on task ${taskId}`);
+    if (action === 'run') {
+      // Find the task to get its agents
+      const task = projectContext?.tasks?.find(t => t._id === taskId);
+
+      if (!task) {
+        toast.error('Task not found');
+        return;
+      }
+
+      if (!currentProjectId) {
+        toast.error('Project ID not available');
+        return;
+      }
+
+      // Use first assigned agent or let backend default to Coral-Interface-Agent
+      const agentId = task.agents && task.agents.length > 0 ? task.agents[0].agentId : undefined;
+
+      toast.info('Starting agent execution...');
+
+      runAgentMutation.mutate({
+        taskId,
+        agentId,
+        projectId: currentProjectId,
+      });
+    } else {
+      toast.success(`Running ${action} on task ${taskId}`);
+    }
   };
 
   const handleMarkComplete = (taskId: string) => {
@@ -163,7 +215,7 @@ const Board = () => {
   };
 
   const handleAddColumn = (columnName: string) => {
-    if (!columnName?.trim()) return;
+    if (!isCurrentProjectValid || !columnName?.trim()) return;
 
     createColumnMutation.mutate({
       projectId: currentProjectId,
@@ -178,6 +230,17 @@ const Board = () => {
   const handleShowTaskDetails = (task: TaskData) => {
     setSelectedTask(task);
     setIsTaskDetailOpen(true);
+  };
+
+  const handleViewResults = (task: TaskData) => {
+    setResultTask(task);
+    setIsResultModalOpen(true);
+  };
+
+  const handleMarkCompleteFromResults = () => {
+    if (resultTask) {
+      handleMarkComplete(resultTask._id);
+    }
   };
 
   const handleUpdateTask = (taskId: string, updates: Partial<TaskData>) => {
@@ -224,15 +287,32 @@ const Board = () => {
     }
   };
 
-  // Show empty project state if no projects exist or no current project selected
-  if (!loading && !currentProjectId) {
-    // Check if we have any projects at all for current organization
+  // Enhanced project validation and routing logic
+  if (!loading && !isOrgSwitching) {
+    // Case 1: No projects exist in current organization
     if (projects.length === 0) {
       return <EmptyProjectState hasOrganization={!!currentOrganization} />;
     }
 
-    // If we have projects but no current project is selected, redirect to first project
-    if (projects.length > 0) {
+    // Case 2: Current project in URL doesn't belong to current organization
+    if (currentProjectId && !isCurrentProjectValid) {
+      console.log('🔄 [Board] Current project not valid for organization - redirecting to first project');
+      // Invalidate the stale project data
+      invalidateProjectData(currentProjectId);
+      // Redirect to first available project
+      window.location.href = `/projects/${projects[0]._id}/board`;
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">Switching to available project...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Case 3: No project selected but projects exist
+    if (!currentProjectId && projects.length > 0) {
       window.location.href = `/projects/${projects[0]._id}/board`;
       return (
         <div className="flex items-center justify-center h-screen">
@@ -260,7 +340,8 @@ const Board = () => {
     );
   }
 
-  if (loading) {
+  // Only show loading if we have a valid project to load
+  if (loading && isCurrentProjectValid) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -273,31 +354,14 @@ const Board = () => {
     );
   }
 
-  if (error) {
-    // Check if this is a 404 error (project not found in current org)
-    const is404 = error instanceof Error && (error.message.includes('404') || error.message.includes('not found'));
-
-    console.log('❌ [Board] Error detected in Board component:', {
+  // Handle errors only for valid project queries
+  if (error && isCurrentProjectValid) {
+    console.log('❌ [Board] Error loading valid project:', {
       error: error instanceof Error ? error.message : String(error),
-      is404,
       currentProjectId,
       currentOrgId: currentOrganization?._id,
       timestamp: new Date().toISOString()
     });
-
-    if (is404) {
-      console.log('❌ [Board] 404 error detected - project likely not in current org, redirecting to home');
-      // Redirect immediately and show loading state
-      window.location.href = '/';
-      return (
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-            <p className="mt-2 text-muted-foreground">Redirecting...</p>
-          </div>
-        </div>
-      );
-    }
 
     return (
       <div className="flex items-center justify-center h-screen">
@@ -307,6 +371,11 @@ const Board = () => {
         </div>
       </div>
     );
+  }
+
+  // Final check: if we reach this point and don't have valid project data, show empty state
+  if (!isCurrentProjectValid) {
+    return <EmptyProjectState hasOrganization={!!currentOrganization} />;
   }
 
   return (
@@ -344,6 +413,7 @@ const Board = () => {
                       onDelete={handleDeleteTask}
                       onMove={handleMoveTask}
                       onShowDetails={handleShowTaskDetails}
+                      onViewResults={handleViewResults}
                     />
                   ))}
                 </BoardColumn>
@@ -371,6 +441,18 @@ const Board = () => {
         onDelete={handleDeleteTask}
         onAssignAgent={handleAssignAgent}
         onRunTask={handleRunTask}
+        projectId={currentProjectId}
+      />
+
+      {/* Agent Result Modal */}
+      <AgentResultModal
+        result={resultTask?.lastAgentResult || null}
+        isOpen={isResultModalOpen}
+        onClose={() => {
+          setIsResultModalOpen(false);
+          setResultTask(null);
+        }}
+        onMarkComplete={handleMarkCompleteFromResults}
       />
 
       {/* AI-Powered Floating Bottom Bar */}

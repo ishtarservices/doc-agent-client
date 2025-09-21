@@ -15,6 +15,9 @@ import {
   createOrganization,
   createProject,
   ensureUserHasOrganization,
+  getAvailableAgents,
+  assignAgentsToTask,
+  runAgent,
   type ColumnData,
   type TaskData,
   type OrganizationData,
@@ -25,9 +28,12 @@ import {
   type UpdateColumnRequest,
   type CreateOrganizationRequest,
   type CreateProjectRequest,
-  type AIRequest,
-  type AIResponse,
+  type AvailableAgent,
+  type AssignAgentsRequest,
+  type RunAgentRequest,
+  type AgentExecutionResult,
 } from '@/lib/api';
+import type { AIRequest, AIResponse } from '@/types/ai';
 
 // Query keys
 export const queryKeys = {
@@ -35,6 +41,7 @@ export const queryKeys = {
   projectContext: (projectId: string) => ['project-context', projectId] as const,
   organizations: () => ['organizations'] as const,
   userOrganizations: () => ['user-organizations'] as const,
+  availableAgents: () => ['available-agents'] as const,
 };
 
 // Hook to fetch project context (tasks and columns)
@@ -506,10 +513,280 @@ export const useCacheManagement = () => {
     });
   };
 
+  // Comprehensive cache invalidation for organization switches
+  const invalidateOnOrganizationSwitch = (oldOrgId?: string, newOrgId?: string) => {
+    console.log('🔄 [useBoardData] Invalidating cache for organization switch:', {
+      oldOrgId,
+      newOrgId,
+      timestamp: new Date().toISOString()
+    });
+
+    // Clear all project-related queries since we're switching organizations
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const queryKey = query.queryKey as string[];
+        return queryKey.includes('project-context') ||
+               queryKey.includes('organization-projects') ||
+               queryKey.includes('project');
+      }
+    });
+
+    // Specifically invalidate organization projects for both old and new orgs
+    if (oldOrgId) {
+      queryClient.invalidateQueries({
+        queryKey: ['organization-projects', oldOrgId]
+      });
+    }
+    if (newOrgId) {
+      queryClient.invalidateQueries({
+        queryKey: ['organization-projects', newOrgId]
+      });
+    }
+
+    // Force refetch of user organizations to get fresh data
+    queryClient.invalidateQueries({ queryKey: queryKeys.userOrganizations() });
+  };
+
   return {
     clearAllCache,
     invalidateUserData,
     invalidateOrganizationData,
     invalidateProjectData,
+    invalidateOnOrganizationSwitch,
   };
+};
+
+// ============================================================================
+// AGENT HOOKS
+// ============================================================================
+
+// Hook to fetch available agents
+export const useAvailableAgents = () => {
+  return useQuery({
+    queryKey: queryKeys.availableAgents(),
+    queryFn: async (): Promise<AvailableAgent[]> => {
+      if (!getAvailableAgents) {
+        console.log('Available agents API not available, returning empty array');
+        return [];
+      }
+      try {
+        const agents = await getAvailableAgents();
+        return agents || [];
+      } catch (error) {
+        console.error('Failed to fetch available agents:', error);
+        return [];
+      }
+    },
+    staleTime: 10 * 60 * 1000, // Consider fresh for 10 minutes
+    refetchOnWindowFocus: false, // Don't refetch on focus since agents don't change frequently
+    retry: (failureCount, error) => {
+      // Don't retry on 403/404 errors
+      if (error instanceof Error && (error.message.includes('403') || error.message.includes('404'))) {
+        return false;
+      }
+      return failureCount < 2;
+    },
+    enabled: !!getAvailableAgents, // Only run if API is available
+  });
+};
+
+// Hook for assigning agents to tasks
+export const useAssignAgents = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ taskId, agents, autoRun, projectId }: {
+      taskId: string;
+      agents: Array<{ agentId: string; agentName: string }>;
+      autoRun?: boolean;
+      projectId: string;
+    }) => {
+      if (!assignAgentsToTask) {
+        toast.error('Agent assignment API not available');
+        throw new Error('Assign agents API not available');
+      }
+      return assignAgentsToTask(taskId, { agents, autoRun });
+    },
+    onMutate: async ({ taskId, agents, projectId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectContext(projectId) });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData(queryKeys.projectContext(projectId));
+
+      // Optimistically update the task with new agents
+      queryClient.setQueryData(
+        queryKeys.projectContext(projectId),
+        (old: unknown) => {
+          const data = old as { tasks?: TaskData[] };
+          if (!data || !data.tasks) return old;
+
+          return {
+            ...data,
+            tasks: data.tasks.map((task: TaskData) =>
+              task._id === taskId
+                ? { ...task, agents, isUpdating: true }
+                : task
+            ),
+          };
+        }
+      );
+
+      return { previousData };
+    },
+    onSuccess: (updatedTask, variables) => {
+      // Invalidate project context to get the latest data
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectContext(variables.projectId) });
+
+      const agentNames = variables.agents.map(a => a.agentName).join(', ');
+      toast.success(`Agents assigned successfully: ${agentNames}`);
+    },
+    onError: (error, variables, context) => {
+      console.error('Error assigning agents:', error);
+
+      // Roll back to the previous state
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.projectContext(variables.projectId), context.previousData);
+      }
+
+      toast.error('Failed to assign agents');
+    },
+    onSettled: (data, error, variables) => {
+      // Always refetch to ensure we have the latest data
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectContext(variables.projectId) });
+    },
+  });
+};
+
+// Hook for running agents on tasks
+export const useRunAgent = (options?: { autoComplete?: boolean }) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ taskId, agentId, options, projectId }: RunAgentRequest & { projectId: string }) => {
+      if (!runAgent) {
+        toast.error('Agent execution API not available');
+        throw new Error('Run agent API not available');
+      }
+      return runAgent({ taskId, agentId, options });
+    },
+    onMutate: async ({ taskId, projectId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.projectContext(projectId) });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData(queryKeys.projectContext(projectId));
+
+      // Optimistically update the task to show it's running
+      queryClient.setQueryData(
+        queryKeys.projectContext(projectId),
+        (old: unknown) => {
+          const data = old as { tasks?: TaskData[] };
+          if (!data || !data.tasks) return old;
+
+          return {
+            ...data,
+            tasks: data.tasks.map((task: TaskData) =>
+              task._id === taskId
+                ? { ...task, isUpdating: true, lastAgentRun: new Date() }
+                : task
+            ),
+          };
+        }
+      );
+
+      return { previousData };
+    },
+    onSuccess: async (result: AgentExecutionResult, variables) => {
+      // Update the task with the execution result
+      queryClient.setQueryData(
+        queryKeys.projectContext(variables.projectId),
+        (old: unknown) => {
+          const data = old as { tasks?: TaskData[]; columns?: ColumnData[] };
+          if (!data || !data.tasks) return old;
+
+          return {
+            ...data,
+            tasks: data.tasks.map((task: TaskData) =>
+              task._id === variables.taskId
+                ? {
+                    ...task,
+                    lastAgentResult: result,
+                    executionResult: result,
+                    lastAgentRun: new Date(),
+                    isUpdating: false
+                  }
+                : task
+            ),
+          };
+        }
+      );
+
+      if (result.success) {
+        // Show success message with artifacts info
+        const artifactsCount = result.artifacts?.length || 0;
+        const description = artifactsCount > 0
+          ? `Generated ${artifactsCount} artifact(s) • ${result.tokensUsed} tokens • ${result.executionTime}ms`
+          : result.output
+            ? `${result.output.substring(0, 100)}...`
+            : `Completed in ${result.executionTime}ms using ${result.tokensUsed} tokens`;
+
+        toast.success(result.message, { description });
+
+        // Auto-complete task if option is enabled and result is successful
+        if (options?.autoComplete) {
+          // Find the "done" column or the last column
+          const currentData = queryClient.getQueryData(queryKeys.projectContext(variables.projectId)) as { columns?: ColumnData[] };
+          const columns = currentData?.columns || [];
+          const doneColumn = columns.find(col => col.name?.toLowerCase().includes('done')) || columns[columns.length - 1];
+
+          if (doneColumn && updateTask) {
+            try {
+              // Move task to done column
+              await updateTask(variables.taskId, {
+                columnId: doneColumn._id,
+                status: 'done' as const,
+                completedAt: new Date()
+              });
+
+              toast.success('Task marked as complete', {
+                description: 'Task moved to done column after successful agent execution'
+              });
+            } catch (error) {
+              console.error('Failed to auto-complete task:', error);
+            }
+          }
+        }
+
+        // Show artifacts notification if available
+        if (result.artifacts && result.artifacts.length > 0) {
+          toast.info(`${result.artifacts.length} artifact(s) generated`, {
+            description: 'Click the sparkle icon on the task to view results',
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('Agent execution failed', {
+          description: result.error || 'Unknown error occurred',
+        });
+      }
+
+      // Always invalidate to get the latest data
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectContext(variables.projectId) });
+    },
+    onError: (error, variables, context) => {
+      console.error('Error running agent:', error);
+
+      // Roll back to the previous state
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.projectContext(variables.projectId), context.previousData);
+      }
+
+      toast.error('Failed to run agent');
+    },
+    onSettled: (data, error, variables) => {
+      // Always refetch to ensure we have the latest data
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectContext(variables.projectId) });
+    },
+  });
 };
